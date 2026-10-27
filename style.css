@@ -61,13 +61,19 @@ kbd {
   position: absolute;
   inset: 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: #0003;
-  font-size: 22px;
+  gap: 14px;
+  padding: 0 10%;
+  text-align: center;
+  color: #0004;
   pointer-events: none;
   transition: opacity 0.6s;
 }
+#hint b { font-weight: normal; font-size: 26px; letter-spacing: 0.06em; }
+#hint small { font-size: 16px; line-height: 1.7; opacity: 0.8; }
+#hint b::before, #hint b::after { content: "·"; margin: 0 0.6em; opacity: 0.6; }
 
 /* ---------- 시작 화면 (둥당기 1편과 같은 모양) ---------- */
 
@@ -758,7 +764,7 @@ body { background: #efe7d6 url("assets/hanji_dak.jpg") center / cover fixed; }
 
 #stage { cursor: crosshair; }
 #stage canvas { pointer-events: none; }
-#stage[data-tone="black"] #hint, #stage[data-tone="gray"] #hint { color: #fff3; }
+#stage[data-tone="black"] #hint, #stage[data-tone="gray"] #hint { color: #fff5; }
 #stage.mix #inkc { filter: invert(1); }   /* 섞음: 수묵은 흰 먹으로 */
 #play #stage { cursor: none; }
 
@@ -771,10 +777,10 @@ body { background: #efe7d6 url("assets/hanji_dak.jpg") center / cover fixed; }
 .stamp-tools { flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 6px; min-width: 0; max-width: 100%; }
 .stamp-tools .row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
 .stamp-tools .lbl { font-size: 14px; }
-.motifs { display: flex; gap: 6px; min-width: 0; overflow-x: auto; padding: 2px 2px 6px; scrollbar-width: thin; }
+.motifs { display: flex; gap: 5px; min-width: 0; overflow-x: auto; padding: 2px 2px 6px; scrollbar-width: thin; }
 #maker .motifs button {
   flex: 0 0 auto;
-  width: 64px;
+  width: 58px;
   padding: 4px 2px 3px;
   display: flex;
   flex-direction: column;
@@ -786,8 +792,8 @@ body { background: #efe7d6 url("assets/hanji_dak.jpg") center / cover fixed; }
   white-space: nowrap;
   overflow: hidden;
 }
-.motifs img { width: 44px; height: 44px; object-fit: contain; pointer-events: none; }
-.motifs span { max-width: 60px; overflow: hidden; text-overflow: ellipsis; }
+.motifs img { width: 40px; height: 40px; object-fit: contain; pointer-events: none; }
+.motifs span { max-width: 55px; overflow: hidden; text-overflow: ellipsis; }
 #maker .motifs[data-kind="jg"] button { background: #151413; color: #d9d1c1; }
 #maker .motifs button.on { background: #f6e6dc; color: var(--ink); border-color: var(--red); box-shadow: 0 0 0 2px var(--red); }
 #maker .motifs[data-kind="jg"] button.on { background: #2e2925; color: #f6efe4; }
@@ -832,3 +838,14 @@ body { background: #efe7d6 url("assets/hanji_dak.jpg") center / cover fixed; }
 
 /* 단청은 흰 한지에 스민 것처럼 (종이 결이 안료 밑으로 비친다) */
 #stage[data-tone="white"] #vecc { mix-blend-mode: multiply; }
+
+/* 문양 무리 고르기 (홑 문양 / 이어 무늬) */
+.mt-top { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.seg { display: flex; flex-direction: column; gap: 4px; flex: none; }
+#maker .seg button { padding: 5px 7px; font-size: 12px; white-space: nowrap; }
+#maker .seg button.on { background: var(--ink); color: #f6efe4; }
+/* 단청 빛깔 */
+.cols { display: flex; gap: 4px; }
+#maker .cols button { padding: 2px; width: 34px; height: 34px; display: grid; place-items: center; }
+.cols img { width: 28px; height: 28px; pointer-events: none; }
+#maker .cols button.on { background: var(--paper); border-color: var(--red); box-shadow: 0 0 0 2px var(--red); }

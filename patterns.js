@@ -55,7 +55,7 @@ function drawStamp(ctx, kind, st, age, live, base = 1, away = 0){
   if (al <= 0.003 || k <= 0.003) return;
   const jg = kind === "jg";
   // 움직이는 동안 크기가 바뀌어도 같은 크기의 그림을 쓴다
-  const im = jg ? MotifArt.jagae(st.m, st.s * base, live / 1000 + ph, live, ph) : MotifArt.sprite(kind, st.m, st.s * base);
+  const im = jg ? MotifArt.jagae(st.m, st.s * base, live / 1000 + ph, live, ph) : MotifArt.sprite(kind, st.m, st.s * base, st.c || 0);
   if (!im) return;
   const w = im.width, h = im.height;
   const sc = st.s / w * k * base;

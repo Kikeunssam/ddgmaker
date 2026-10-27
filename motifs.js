@@ -33,11 +33,21 @@ function banded(g, path, cols, ax = 0, ay = 0, lw = 0.03, steps = [1, 0.74, 0.5,
   });
 }
 // 굵은 선(덩굴·구름 고리 등)을 휘 넣어 긋는다
-function bandedStroke(g, path, cols, w){
-  g.lineJoin = "round"; g.lineCap = "round";
-  const ws = [w + 0.05, w + 0.022, w, w * 0.62, w * 0.28];
-  const cs = [C.ink, C.white, cols[0], cols[1], cols[2]];
-  ws.forEach((lw, i) => { g.strokeStyle = cs[i]; g.lineWidth = lw; g.stroke(path); });
+function bandedStroke(g, path, cols, w){ strokeLayers(g, [[path, cols, w]]); }
+// 여러 선을 한 켜씩 함께 긋는다 (먹선 → 백선 → 휘). 갈라져 나온 덩굴손이 줄기와 끊김 없이 이어진다.
+function strokeLayers(g, items, join = "round"){
+  g.lineJoin = join; g.lineCap = "round";
+  for (let L = 0; L < 5; L++) for (const [p, cols, w] of items){
+    g.strokeStyle = [C.ink, C.white, cols[0], cols[1], cols[2]][L];
+    g.lineWidth = [w + 0.05, w + 0.022, w, w * 0.62, w * 0.28][L];
+    g.stroke(p);
+  }
+}
+// 덩굴손: (x,y)에서 h 쪽으로 뻗어 나가며 점점 세게 감긴다 (dir 1: 시계 방향, -1: 반대)
+function tendril(p, x, y, h, len, k0, k1, dir = 1, move = true){
+  const n = 72, ds = len / n;
+  if (move) p.moveTo(x, y);
+  for (let i = 0; i < n; i++){ h += dir * (k0 + k1 * i / n) * ds; x += Math.cos(h) * ds; y += Math.sin(h) * ds; p.lineTo(x, y); }
 }
 const path = (f) => { const p = new Path2D(); f(p); return p; };
 // 꽃잎: (0,0)에서 위쪽(-y)으로 len, 폭 w. tip 0이면 둥글고 1이면 뾰족
@@ -77,6 +87,21 @@ function spiral(p, cx, cy, r0, r1, a0, turns, dir = 1, move = true){
   }
 }
 function dot(g, x, y, r, col){ g.fillStyle = C.ink; g.beginPath(); g.arc(x, y, r + 0.018, 0, TAU); g.fill(); g.fillStyle = col; g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill(); }
+
+// 이어 무늬 판: 바탕을 칠하고 안쪽에만 무늬를 그린 뒤 먹선·백선 테를 두른다
+function frame(g, x, y, w, h){
+  g.lineJoin = "miter";
+  g.strokeStyle = C.ink; g.lineWidth = 0.045; g.strokeRect(x, y, w, h);
+  g.strokeStyle = C.white; g.lineWidth = 0.014; g.strokeRect(x + 0.035, y + 0.035, w - 0.07, h - 0.07);
+}
+function panel(g, bg, f, r = 0.94){
+  g.save(); g.fillStyle = bg; g.fillRect(-r, -r, r * 2, r * 2); g.beginPath(); g.rect(-r, -r, r * 2, r * 2); g.clip(); f(); g.restore();
+  frame(g, -r, -r, r * 2, r * 2);
+}
+function strip(g, h, bg, f){
+  g.save(); g.fillStyle = bg; g.fillRect(-0.96, -h, 1.92, h * 2); g.beginPath(); g.rect(-0.96, -h, 1.92, h * 2); g.clip(); f(); g.restore();
+  frame(g, -0.96, -h, 1.92, h * 2);
+}
 
 // ---------- 단청 문양 ----------
 const DC = [
@@ -148,7 +173,7 @@ const DC = [
   } },
   { name: "삼태극", draw(g){
     banded(g, circle(0, 0, 0.97), [C.green[0], C.green[1]], 0, 0, 0.03, [1, 0.93]);
-    const R = 0.82, cols = ["#b43f2c", "#2f5c9c", "#d4a032"];
+    const R = 0.82, cols = [C.red[1], C.blue[1], C.yellow[1]];
     for (let k = 0; k < 3; k++){
       const a0 = -Math.PI / 2 + TAU * k / 3, a1 = a0 + TAU / 3;
       const p = new Path2D();
@@ -186,20 +211,22 @@ const DC = [
     banded(g, circle(0, 0, 0.16), C.green);
   } },
   { name: "덩굴", draw(g){
-    const stem = path((p) => {
-      p.moveTo(-0.95, 0.5);
-      p.bezierCurveTo(-0.6, 0.85, -0.2, 0.3, 0, 0);
-      p.bezierCurveTo(0.2, -0.3, 0.55, -0.7, 0.9, -0.45);
-    });
-    const curl1 = path((p) => { p.moveTo(-0.2, 0.32); p.bezierCurveTo(-0.45, 0.1, -0.5, -0.25, -0.3, -0.38); spiral(p, -0.38, -0.22, 0.17, 0.02, -1.0, 1.2, -1, false); });
-    const curl2 = path((p) => { p.moveTo(0.3, -0.38); p.bezierCurveTo(0.55, -0.1, 0.62, 0.25, 0.42, 0.42); spiral(p, 0.5, 0.25, 0.18, 0.02, 2.0, 1.2, 1, false); });
-    for (const [x, y, a] of [[-0.62, 0.62, 2.4], [-0.1, 0.06, -0.9], [0.62, -0.62, 0.6], [0.08, -0.14, 2.2]]){
-      g.save(); g.translate(x, y); g.rotate(a); banded(g, petal(0.36, 0.13, 1), C.green, 0, -0.18, 0.02, [1, 0.66, 0.34]); g.restore();
+    // 판 안에 꽃까지 다 들어오게 (끝이 잘리지 않게)
+    const P = [[-0.7, 0.5], [-0.6, -0.15], [-0.15, 0.6], [0, 0.02], [0.15, -0.55], [0.6, 0.15], [0.7, -0.5]];
+    const at = (k, u) => { const [a, b, c, d] = P.slice(k * 3, k * 3 + 4), v = 1 - u;
+      const pt = [0, 1].map((i) => v * v * v * a[i] + 3 * v * v * u * b[i] + 3 * v * u * u * c[i] + u * u * u * d[i]);
+      const dv = [0, 1].map((i) => 3 * v * v * (b[i] - a[i]) + 6 * v * u * (c[i] - b[i]) + 3 * u * u * (d[i] - c[i]));
+      return [pt[0], pt[1], Math.atan2(dv[1], dv[0])]; };
+    const stem = path((p) => { p.moveTo(...P[0]); p.bezierCurveTo(...P[1], ...P[2], ...P[3]); p.bezierCurveTo(...P[4], ...P[5], ...P[6]); });
+    const [x1, y1, h1] = at(0, 0.62), [x2, y2, h2] = at(1, 0.38);
+    const curl1 = path((p) => tendril(p, x1, y1, h1 + 0.4, 0.95, 1.0, 11, 1));
+    const curl2 = path((p) => tendril(p, x2, y2, h2 - 0.4, 0.95, 1.0, 11, -1));
+    for (const [k, u, side] of [[0, 0.3, -1], [0, 0.85, -1], [1, 0.15, 1], [1, 0.7, 1]]){
+      const [x, y, h] = at(k, u);
+      g.save(); g.translate(x, y); g.rotate(h + side * 0.9 + Math.PI / 2); banded(g, petal(0.3, 0.12, 1), C.green, 0, -0.15, 0.02, [1, 0.66, 0.34]); g.restore();
     }
-    bandedStroke(g, stem, C.green, 0.07);
-    bandedStroke(g, curl1, C.teal, 0.055);
-    bandedStroke(g, curl2, C.teal, 0.055);
-    for (const [x, y] of [[-0.95, 0.5], [0.9, -0.45]]){ g.save(); g.translate(x, y); ring(g, 5, () => banded(g, roundPetal(0.17, 0.08), C.red, 0, -0.1, 0.014, [1, 0.6])); dot(g, 0, 0, 0.04, C.yellow[1]); g.restore(); }
+    strokeLayers(g, [[stem, C.green, 0.065], [curl1, C.teal, 0.045], [curl2, C.teal, 0.045]]);
+    for (const [x, y] of [P[0], P[6]]){ g.save(); g.translate(x, y); ring(g, 5, () => banded(g, roundPetal(0.19, 0.09), C.red, 0, -0.1, 0.016, [1, 0.6])); dot(g, 0, 0, 0.045, C.yellow[1]); g.restore(); }
   } },
   { name: "석류", draw(g){
     for (const [a, d] of [[-0.9, -1], [0.9, 1]]){
@@ -223,6 +250,142 @@ const DC = [
       dot(g, 0, 0, 0.045, C.red[1]);
       g.restore();
     }
+  } },
+  // ---------- 이어 무늬 (같은 무늬가 되풀이되는 판·띠) ----------
+  { name: "아자문", rep: true, draw(g){
+    panel(g, C.blue[0], () => {
+      const u = 0.46, a = u * 0.42, b = u * 0.2;
+      for (let i = -2; i <= 2; i++) for (let j = -2; j <= 2; j++){
+        const x = i * u, y = j * u;
+        const p = path((q) => [[-b, -a], [b, -a], [b, -b], [a, -b], [a, b], [b, b], [b, a], [-b, a], [-b, b], [-a, b], [-a, -b], [-b, -b]].forEach(([px, py], k) => (k ? q.lineTo(x + px, y + py) : q.moveTo(x + px, y + py))));
+        banded(g, p, (i + j) & 1 ? C.yellow : C.green, x, y, 0.02, [1, 0.7, 0.42, 0.18]);
+        dot(g, x + u / 2, y + u / 2, 0.04, C.red[1]);
+      }
+    });
+  } },
+  { name: "뇌문 띠", rep: true, draw(g){
+    strip(g, 0.4, C.red[1], () => {
+      const w = 0.5, H = 0.46;
+      const p = path((q) => {
+        q.moveTo(-1.2, H / 2); q.lineTo(1.2, H / 2);
+        for (let i = -3; i <= 2; i++){
+          const x = i * w + 0.12;
+          [[0, H / 2], [0, -H / 2], [w * 0.8, -H / 2], [w * 0.8, H * 0.2], [w * 0.28, H * 0.2], [w * 0.28, -H * 0.12], [w * 0.55, -H * 0.12]]
+            .forEach(([px, py], k) => (k ? q.lineTo(x + px, py) : q.moveTo(x + px, py)));
+        }
+      });
+      strokeLayers(g, [[p, C.yellow, 0.045]], "miter");
+    });
+  } },
+  { name: "귀갑문", rep: true, draw(g){
+    panel(g, C.green[0], () => {
+      const R = 0.27, dx = R * 1.5, dy = R * Math.sqrt(3);
+      for (let i = -4; i <= 4; i++) for (let j = -3; j <= 3; j++){
+        g.save(); g.translate(i * dx, j * dy + (i & 1 ? dy / 2 : 0));
+        banded(g, polygon(6, R * 0.86), i & 1 ? C.teal : C.blue, 0, 0, 0.018, [1, 0.8, 0.6, 0.4]);
+        ring(g, 6, () => banded(g, roundPetal(R * 0.4, R * 0.16), C.red, 0, -R * 0.2, 0.01, [1, 0.6]));
+        dot(g, 0, 0, R * 0.1, C.yellow[1]);
+        g.restore();
+      }
+    });
+  } },
+  { name: "칠보문", rep: true, draw(g){
+    panel(g, C.yellow[3], () => {
+      const s = 0.42, cs = [];
+      for (let i = -3; i <= 3; i++) for (let j = -3; j <= 3; j++) cs.push([i * s, j * s]);
+      for (const [x, y] of cs) for (const [ox, oy, col] of [[s, 0, C.blue], [0, s, C.green]]){
+        g.save(); g.clip(circle(x, y, s)); g.fillStyle = col[1]; g.fill(circle(x + ox, y + oy, s));
+        g.fillStyle = col[2]; g.fill(path((q) => q.ellipse(x + ox / 2, y + oy / 2, ox ? 0.05 : 0.2, oy ? 0.05 : 0.2, 0, 0, TAU))); g.restore();
+      }
+      g.lineWidth = 0.05; g.strokeStyle = C.ink; for (const [x, y] of cs) g.stroke(circle(x, y, s));
+      g.lineWidth = 0.016; g.strokeStyle = C.white; for (const [x, y] of cs) g.stroke(circle(x, y, s));
+      for (const [x, y] of cs){ dot(g, x + s / 2, y + s / 2, 0.06, C.red[1]); dot(g, x, y, 0.045, C.orange[1]); }
+    });
+  } },
+  { name: "물결 비늘", rep: true, draw(g){
+    panel(g, C.blue[0], () => {
+      const r = 0.32, ks = [1, 0.92, 0.82, 0.74, 0.62, 0.54, 0.4, 0.32];
+      for (let j = -7; j <= 7; j++) for (let i = -3; i <= 3; i++){
+        const x = i * r * 2 + (j & 1 ? r : 0), y = j * r * 0.5;
+        const cols = [C.ink, C.white, C.blue[1], C.white, C.blue[2], C.white, C.teal[2], C.white];
+        ks.forEach((k, n) => { g.fillStyle = cols[n]; g.fill(circle(x, y, r * k)); });
+      }
+    });
+  } },
+  { name: "빗살 띠", rep: true, draw(g){
+    strip(g, 0.42, C.blue[0], () => {
+      const zig = (y0) => path((q) => { for (let k = 0; k <= 16; k++){ const x = -1.2 + k * 0.15, y = y0 + (k & 1 ? -0.1 : 0.1); k ? q.lineTo(x, y) : q.moveTo(x, y); } });
+      strokeLayers(g, [[zig(-0.22), C.red, 0.055], [zig(0), C.yellow, 0.055], [zig(0.22), C.green, 0.055]], "miter");
+    });
+  } },
+  { name: "연주 띠", rep: true, draw(g){
+    strip(g, 0.32, C.green[0], () => {
+      g.fillStyle = C.yellow[1]; g.fillRect(-1, -0.25, 2, 0.03); g.fillRect(-1, 0.22, 2, 0.03);
+      for (let k = -3; k <= 3; k++){
+        const x = k * 0.27;
+        if (k & 1){ g.save(); g.translate(x, 0); g.rotate(Math.PI / 4); banded(g, path((q) => q.rect(-0.07, -0.07, 0.14, 0.14)), C.red, 0, 0, 0.014, [1, 0.6, 0.3]); g.restore(); }
+        else banded(g, circle(x, 0, 0.12), C.yellow, x, 0, 0.018, [1, 0.72, 0.45, 0.2]);
+      }
+    });
+  } },
+  { name: "꽃 격자", rep: true, draw(g){
+    panel(g, C.red[0], () => {
+      g.rotate(Math.PI / 4);
+      const d = 0.42;
+      strokeLayers(g, [[path((q) => { for (let k = -4; k <= 4; k++){ q.moveTo(k * d, -2); q.lineTo(k * d, 2); q.moveTo(-2, k * d); q.lineTo(2, k * d); } }), C.yellow, 0.045]]);
+      for (let i = -4; i <= 4; i++) for (let j = -4; j <= 4; j++){
+        g.save(); g.translate(i * d, j * d); ring(g, 4, () => banded(g, roundPetal(0.15, 0.07), C.pink, 0, -0.08, 0.012, [1, 0.6, 0.3])); dot(g, 0, 0, 0.035, C.yellow[1]); g.restore();
+        dot(g, (i + 0.5) * d, (j + 0.5) * d, 0.04, C.green[1]);
+      }
+    });
+  } },
+  { name: "당초 띠", rep: true, draw(g){
+    strip(g, 0.46, C.blue[0], () => {
+      const f = (x) => 0.14 * Math.sin(x * Math.PI * 1.25), df = (x) => 0.14 * Math.PI * 1.25 * Math.cos(x * Math.PI * 1.25);
+      const stem = path((q) => { for (let k = 0; k <= 90; k++){ const x = -1.2 + 2.4 * k / 90; k ? q.lineTo(x, f(x)) : q.moveTo(x, f(x)); } });
+      const items = [[stem, C.green, 0.05]];
+      [-0.8, -0.4, 0, 0.4, 0.8].forEach((x, k) => {
+        const up = k & 1 ? 1 : -1, h = Math.atan(df(x));
+        items.push([path((q) => tendril(q, x, f(x), h + up * 0.8, 0.62, 1.6, 12, -up)), C.yellow, 0.032]);
+        const lx = x + 0.2, lh = Math.atan(df(lx));
+        g.save(); g.translate(lx, f(lx)); g.rotate(lh + (up > 0 ? -1 : 1) * 0.9 + (up > 0 ? Math.PI : 0) + Math.PI / 2); banded(g, petal(0.3, 0.1, 1), C.green, 0, -0.15, 0.016, [1, 0.62, 0.3]); g.restore();
+      });
+      strokeLayers(g, items);
+      [-0.8, -0.4, 0, 0.4, 0.8].forEach((x) => dot(g, x, f(x), 0.035, C.red[1]));
+    });
+  } },
+  { name: "꽃살", rep: true, draw(g){
+    panel(g, C.white, () => {
+      g.rotate(Math.PI / 4);
+      const d = 0.4;
+      strokeLayers(g, [[path((q) => { for (let k = -4; k <= 4; k++){ q.moveTo(k * d, -2); q.lineTo(k * d, 2); q.moveTo(-2, k * d); q.lineTo(2, k * d); } }), [C.yellow[0], C.yellow[1], C.yellow[2]], 0.08]], "miter");
+      for (let i = -4; i <= 4; i++) for (let j = -4; j <= 4; j++){
+        g.save(); g.translate(i * d, j * d); g.rotate(Math.PI / 4);
+        ring(g, 4, () => banded(g, roundPetal(0.15, 0.085), C.red, 0, -0.08, 0.012, [1, 0.62, 0.3]));
+        g.rotate(Math.PI / 4); ring(g, 4, () => banded(g, petal(0.1, 0.035, 1), C.green, 0, -0.05, 0.01, [1, 0.5]));
+        dot(g, 0, 0, 0.035, C.yellow[1]); g.restore();
+      }
+    });
+  } },
+  { name: "구름 띠", rep: true, draw(g){
+    strip(g, 0.4, C.teal[3], () => {
+      const items = [];
+      for (let k = -1.5; k <= 1.5; k++){
+        const x = k * 0.44 + 0.04;
+        items.push([path((q) => { q.moveTo(x - 0.22, 0.24); q.quadraticCurveTo(x - 0.05, 0.26, x + 0.02, 0.14); tendril(q, x + 0.02, 0.14, -1.2, 0.5, 2.5, 18, -1, false); }), C.blue, 0.04]);
+      }
+      strokeLayers(g, items);
+      for (let k = -1.5; k <= 1.5; k++) dot(g, k * 0.44 + 0.22, 0.2, 0.03, C.red[1]);
+    });
+  } },
+  { name: "연판 띠", rep: true, draw(g){
+    strip(g, 0.42, C.green[0], () => {
+      g.fillStyle = C.yellow[1]; g.fillRect(-1, 0.3, 2, 0.04);
+      for (let k = -3; k <= 3; k++){
+        g.save(); g.translate(k * 0.27, 0.32); banded(g, roundPetal(0.58, 0.12), k & 1 ? C.pink : C.red, 0, -0.28, 0.016); g.restore();
+        dot(g, k * 0.27 + 0.135, -0.3, 0.035, C.yellow[2]);
+      }
+    });
   } },
 ];
 
@@ -255,6 +418,14 @@ function flower5(g, x, y, r, rot = 0){
   g.restore();
 }
 
+// 자개 이어 무늬 판: 안쪽에만 조각을 놓고 둘레에 조각 테를 두른다
+function jpanel(g, f, r = 0.93){
+  g.save(); g.beginPath(); g.rect(-r, -r, r * 2, r * 2); g.clip(); f(); g.restore();
+  g.globalCompositeOperation = "source-over"; g.lineJoin = "miter";
+  g.lineWidth = 0.05; g.strokeStyle = "#fff"; g.strokeRect(-r, -r, r * 2, r * 2);
+  gap(g, path((q) => q.rect(-r + 0.04, -r + 0.04, r * 2 - 0.08, r * 2 - 0.08)), 0.02);
+}
+
 // 자개는 연주할 때 조각이 살아 움직인다: draw(g, t)의 t는 초 단위 시계.
 // head: 문양이 바라보는 쪽(라디안). '날아가기' 움직임은 이쪽으로 날아간다.
 const sway = (t, f, a, ph = 0) => Math.sin(t * f + ph) * a;
@@ -263,6 +434,7 @@ function about(g, x, y, a, f){ g.save(); g.translate(x, y); g.rotate(a); g.trans
 const JG = [
   { name: "학", head: 0, draw(g, t){
     const f = Math.sin(t * 4.2);   // 날갯짓
+    g.scale(0.9, 0.9);   // 날개 끝이 판 밖으로 나가지 않게
     g.translate(-0.02, 0.18 - f * 0.035);
     g.rotate(-0.08);
     const feathers = (x, y, a0, a1, n, l0, l1, w, da, k) => {
@@ -325,6 +497,7 @@ const JG = [
     for (let i = 0; i < 7; i++){ const a = TAU * i / 7 + t * 0.5; hole(g, circle(0.1 * Math.cos(a), 0.1 * Math.sin(a) - 0.05, 0.025)); }
   } },
   { name: "매화 가지", head: 0, draw(g, t){
+    g.scale(0.93, 0.93);
     about(g, -0.95, 0.75, sway(t, 1.1, 0.03), () => {
       taper(g, bez([-0.95, 0.75], [-0.5, 0.5], [-0.1, 0.4], [0.3, -0.05]), 0.11, 0.05);
       taper(g, bez([0.3, -0.05], [0.5, -0.3], [0.7, -0.45], [0.95, -0.55]), 0.05, 0.02);
@@ -385,6 +558,7 @@ const JG = [
     g.restore();
   } },
   { name: "물고기", head: Math.PI, draw(g, t){
+    g.scale(0.95, 0.95);
     g.rotate(sway(t, 3.5, 0.06));
     about(g, 0.44, 0, sway(t, 7, 0.42), () => {
       const tail = path((p) => { p.moveTo(0.44, 0.0); p.lineTo(0.95, -0.38); p.quadraticCurveTo(0.8, 0.0, 0.95, 0.38); p.closePath(); });
@@ -481,6 +655,134 @@ const JG = [
         const x = (i - (n - 1) / 2) * 0.19 + (y > 0 ? -0.04 : 0), yy = y + sway(t, 2.4, 0.012, ri + i);
         const p = circle(x, yy, 0.1); fill(g, p); gap(g, p, 0.022); hole(g, circle(x - 0.03, yy - 0.03, 0.015));
       } });
+    });
+  } },
+  // ---------- 이어 무늬 (되풀이되는 조각이 물결치듯 움직인다) ----------
+  { name: "물결", rep: true, head: 0, draw(g, t){
+    jpanel(g, () => {
+      const r = 0.34;
+      for (let j = -7; j <= 7; j++){
+        const off = (t * 0.1 * (j & 1 ? 1 : -1)) % (2 * r);
+        for (let i = -3; i <= 3; i++){
+          const x = i * 2 * r + (j & 1 ? r : 0) + off, y = j * r * 0.5 + Math.sin(t * 1.5 + i * 0.8 + j) * 0.012;
+          hole(g, circle(x, y, r + 0.014)); fill(g, circle(x, y, r));
+          for (const k of [0.74, 0.48, 0.22]) gap(g, circle(x, y, r * k), 0.022);
+        }
+      }
+    });
+  } },
+  { name: "귀갑", rep: true, head: 0, draw(g, t){
+    jpanel(g, () => {
+      const R = 0.26, dx = R * 1.5, dy = R * Math.sqrt(3);
+      for (let i = -4; i <= 4; i++) for (let j = -3; j <= 3; j++){
+        const x = i * dx, y = j * dy + (i & 1 ? dy / 2 : 0), w = Math.sin(t * 2.2 - Math.hypot(x, y) * 4);
+        g.save(); g.translate(x, y);
+        const p = polygon(6, R * (0.84 + 0.08 * w)); fill(g, p); gap(g, p, 0.02);
+        hole(g, polygon(6, R * 0.42 * (1 + 0.15 * w), t * 0.6 * ((i + j) & 1 ? 1 : -1)));
+        fill(g, circle(0, 0, R * 0.12));
+        g.restore();
+      }
+    });
+  } },
+  { name: "나비 떼", rep: true, head: -Math.PI / 2, draw(g, t){
+    [[-0.5, 0.32, 0.36, 0], [0.1, -0.4, 0.44, 1.7], [0.55, 0.36, 0.32, 3.1]].forEach(([x, y, s, o]) => {
+      g.save(); g.translate(x + sway(t, 0.9, 0.06, o), y + sway(t, 1.3, 0.05, o)); g.rotate(sway(t, 0.8, 0.25, o)); g.scale(s, s);
+      JG[1].draw(g, t * 1.1 + o); g.restore();
+    });
+  } },
+  { name: "학 떼", rep: true, head: 0, draw(g, t){
+    [[-0.48, -0.46, 0.42, 0], [0.36, 0.0, 0.48, 1.2], [-0.44, 0.5, 0.38, 2.3]].forEach(([x, y, s, o]) => {
+      g.save(); g.translate(x + sway(t, 0.7, 0.04, o), y + sway(t, 1.1, 0.04, o)); g.scale(s, s);
+      JG[0].draw(g, t + o); g.restore();
+    });
+  } },
+  { name: "물고기 떼", rep: true, head: 0, draw(g, t){
+    for (let i = 0; i < 4; i++){
+      const a = t * 0.6 + i * TAU / 4;
+      g.save(); g.translate(0.58 * Math.cos(a), 0.58 * Math.sin(a)); g.rotate(a - Math.PI / 2); g.scale(0.3, 0.3);
+      JG[8].draw(g, t * 1.3 + i); g.restore();
+    }
+    flower5(g, 0, 0, 0.16, -t * 0.5);
+  } },
+  { name: "꽃 띠", rep: true, head: 0, draw(g, t){
+    [-0.36, 0.36].forEach((y, n) => {
+      fill(g, path((q) => q.rect(-0.95, y - 0.04, 1.9, 0.08)));
+      const o = ((t * 0.15 * (n ? -1 : 1)) % 0.2 + 0.2) % 0.2;
+      for (let x = -0.95 + o; x < 0.95; x += 0.2) gap(g, line([[x, y - 0.06], [x, y + 0.06]]), 0.016);
+    });
+    for (let k = -2; k <= 2; k++){
+      flower5(g, k * 0.38, sway(t, 1.6, 0.03, k), 0.13 * (1 + 0.08 * Math.sin(t * 2 + k)), t * (k & 1 ? 0.8 : -0.8));
+      if (k < 2) for (const d of [-1, 1]){ g.save(); g.translate((k + 0.5) * 0.38, 0); g.rotate((d < 0 ? 0 : Math.PI) + sway(t, 2, 0.25, k + d)); const p = petal(0.13, 0.045, 1); fill(g, p); gap(g, p, 0.012); g.restore(); }
+    }
+  } },
+  { name: "구슬 띠", rep: true, head: 0, draw(g, t){
+    const beads = [];
+    for (const ph of [0, Math.PI]) for (let k = 0; k < 13; k++){
+      const x = -0.84 + k * 0.14, a = x * 3.2 - t * 2.2 + ph;
+      beads.push([x, 0.3 * Math.sin(a), Math.cos(a)]);
+    }
+    beads.sort((p, q) => p[2] - q[2]);
+    for (const [x, y, z] of beads){
+      const r = 0.05 + 0.03 * (z + 1) / 2;
+      hole(g, circle(x, y, r + 0.016)); fill(g, circle(x, y, r)); hole(g, circle(x - r * 0.35, y - r * 0.35, r * 0.22));
+    }
+  } },
+  { name: "마름모", rep: true, head: 0, draw(g, t){
+    jpanel(g, () => {
+      const d = 0.3;
+      for (let i = -4; i <= 4; i++) for (let j = -4; j <= 4; j++){
+        if ((i + j) & 1) continue;
+        const w = 0.5 + 0.5 * Math.sin(t * 2 - (i - j) * 0.6), k = 0.6 + 0.32 * w;
+        g.save(); g.translate(i * d, j * d);
+        const p = polygon(4, d * k, 0); fill(g, p); gap(g, p, 0.018); hole(g, polygon(4, d * k * 0.35, 0));
+        g.restore();
+      }
+    });
+  } },
+  { name: "꽃비", rep: true, head: Math.PI / 2, draw(g, t){
+    for (let i = 0; i < 16; i++){
+      const fr = (v) => v - Math.floor(v);
+      const x0 = fr(i * 0.618) * 1.4 - 0.7, sp = 0.12 + fr(i * 0.37) * 0.12, y0 = fr(i * 0.43) * 2.2, r = 0.07 + fr(i * 0.29) * 0.07;
+      const y = fr((y0 + t * sp) / 2.2) * 2.2 - 1.1, x = x0 + Math.sin(t * 1.1 + i * 1.7) * 0.08;
+      const k = Math.min(1, Math.max(0, (0.95 - Math.abs(y) - r) / 0.2));
+      if (k > 0.05) flower5(g, x, y, r * k, t * (i & 1 ? 1.2 : -1.2) + i);
+    }
+  } },
+  { name: "당초", rep: true, head: 0, draw(g, t){
+    const f = (x) => 0.15 * Math.sin(x * 3.6 - t * 1.4), df = (x) => 0.15 * 3.6 * Math.cos(x * 3.6 - t * 1.4);
+    const pts = []; for (let k = 0; k <= 40; k++){ const x = -0.92 + 1.84 * k / 40; pts.push([x, f(x)]); }
+    taper(g, pts, 0.05, 0.05);
+    g.lineWidth = 0.028; g.strokeStyle = "#fff"; g.lineCap = "round"; g.lineJoin = "round";
+    [-0.66, -0.36, -0.06, 0.24, 0.54].forEach((x, k) => {
+      const up = k & 1 ? 1 : -1, h = Math.atan(df(x));
+      g.stroke(path((q) => tendril(q, x, f(x), h + up * 0.8, 0.6, 1.6, 11 + 3 * Math.sin(t * 1.5 + k), -up)));
+      const lx = x + 0.18, lh = Math.atan(df(lx));
+      g.save(); g.translate(lx, f(lx)); g.rotate(lh + (up > 0 ? 0.9 : -0.9) + (up > 0 ? 0 : Math.PI) - Math.PI / 2 + sway(t, 2, 0.15, k));
+      const p = petal(0.3, 0.1, 1); fill(g, p); gap(g, line([[0, -0.03], [0, -0.25]]), 0.012); g.restore();
+    });
+  } },
+  { name: "물무늬", rep: true, head: 0, draw(g, t){
+    for (let i = 0; i < 5; i++){
+      const u = (t * 0.2 + i / 5) % 1, r = 0.16 + u * 0.76;
+      g.lineWidth = 0.075 * (1 - u) + 0.015; g.strokeStyle = "#fff"; g.beginPath(); g.arc(0, 0, r, 0, TAU); g.stroke();
+      for (let s = 0; s < 12; s++){ const a = s * TAU / 12 + t * 0.3 * (i & 1 ? 1 : -1) + i; gap(g, line([[(r - 0.05) * Math.cos(a), (r - 0.05) * Math.sin(a)], [(r + 0.05) * Math.cos(a), (r + 0.05) * Math.sin(a)]]), 0.016); }
+    }
+    flower5(g, 0, 0, 0.12 * (1 + 0.12 * Math.sin(t * 3)), t * 0.7);
+  } },
+  { name: "꽃 사방", rep: true, head: 0, draw(g, t){
+    jpanel(g, () => {
+      const s = 0.62;
+      for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++){
+        const br = 1 + 0.06 * Math.sin(t * 2 + i + j);
+        g.save(); g.translate(i * s, j * s); g.rotate(t * 0.5 * ((i + j) & 1 ? 1 : -1));
+        ring(g, 4, () => { const p = petal(0.26 * br, 0.12, 0.6); fill(g, p); gap(g, p, 0.018); gap(g, line([[0, -0.04], [0, -0.2 * br]]), 0.01); });
+        hole(g, circle(0, 0, 0.04)); g.restore();
+      }
+      for (let i = -1; i <= 0; i++) for (let j = -1; j <= 0; j++) flower5(g, (i + 0.5) * s, (j + 0.5) * s, 0.08, -t);
+      for (let i = -1; i <= 1; i++) for (const [x, y] of [[(i) * s, -0.31], [(i) * s, 0.31], [-0.31, i * s], [0.31, i * s]]){
+        const k = 0.6 + 0.3 * Math.sin(t * 2.5 - x * 2 - y * 2);
+        g.save(); g.translate(x, y); fill(g, polygon(4, 0.08 * k, 0)); g.restore();
+      }
     });
   } },
 ];
@@ -589,31 +891,53 @@ function jagae(idx, need, t, live, ph){
   return cv;
 }
 
-// ---------- 단청 그림 (크기별로 한 번 그려 둔다) ----------
+// ---------- 단청 빛깔 바꾸기 ----------
+// 찍은 문양마다 빛깔 조합(c)을 고를 수 있다. 먹선·백선은 그대로 두고 빛깔 무리만 바꾼다.
+// 링크에 번호로 담으므로 순서를 바꾸지 말 것.
+const FAM = ["red", "orange", "yellow", "green", "teal", "blue", "pink"];   // 빛깔 고리 순서
+const BASE = Object.fromEntries(FAM.map((k) => [k, C[k].slice()]));
+const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+const toHex = (a) => "#" + a.map((v) => Math.round(Math.min(255, Math.max(0, v))).toString(16).padStart(2, "0")).join("");
+const SCHEMES = [
+  { name: "본디 빛깔", map: (k) => BASE[k] },
+  { name: "빛 돌리기 하나", map: (k) => BASE[FAM[(FAM.indexOf(k) + 2) % 7]] },
+  { name: "빛 돌리기 둘", map: (k) => BASE[FAM[(FAM.indexOf(k) + 4) % 7]] },
+  { name: "빛 돌리기 셋", map: (k) => BASE[FAM[(FAM.indexOf(k) + 5) % 7]] },
+  // 색 뒤집기: 빛깔마다 맞은빛(보색)으로. 짙은 빛이 바깥에 오도록 순서도 뒤집는다.
+  { name: "색 뒤집기", map: (k) => BASE[k].map((h) => toHex(hex(h).map((v) => 255 - v))).reverse() },
+  // 먹빛: 빛깔을 빼고 먹의 농담만 남긴다
+  { name: "먹빛", map: (k) => BASE[k].map((h) => { const [r, g, b] = hex(h), y = 0.3 * r + 0.59 * g + 0.11 * b; return toHex([y * 0.96, y * 0.95, y * 0.92]); }) },
+  // 금단청: 누런 금빛과 붉은빛 두 가지로
+  { name: "금빛", map: (k) => BASE[["red", "pink", "orange"].includes(k) ? "red" : k === "yellow" ? "orange" : "yellow"] },
+];
+function useScheme(c){ const sc = SCHEMES[c] || SCHEMES[0]; for (const k of FAM) C[k] = sc.map(k); }
+
+// ---------- 단청 그림 (크기·빛깔별로 한 번 그려 둔다) ----------
 const cache = new Map();
-function sprite(kind, idx, need){
+function sprite(kind, idx, need, c = 0){
   const m = DC[idx];
   if (!m) return null;
   const size = bucket(need, 2048);
-  const key = idx + ":" + size;
+  const key = idx + ":" + size + ":" + c;
   let cv = cache.get(key);
   if (cv) return cv;
   cv = document.createElement("canvas"); cv.width = cv.height = size;
   const g = cv.getContext("2d");
   g.translate(size / 2, size / 2); g.scale(size / 2 * 0.97, size / 2 * 0.97);
-  m.draw(g);
+  useScheme(c);
+  try { m.draw(g); } finally { useScheme(0); }
   finishDancheong(cv, idx + 1);
   cache.set(key, cv);
   return cv;
 }
 // 고르기 단추에 쓰는 작은 그림
-function icon(kind, idx, px = 96){
-  const src = kind === "dc" ? sprite(kind, idx, px) : jagae(idx, px, 0.3, 4000, 0);
-  const c = document.createElement("canvas"); c.width = c.height = src.width;
-  c.getContext("2d").drawImage(src, 0, 0);
-  return c.toDataURL("image/png");
+function icon(kind, idx, px = 96, c = 0){
+  const src = kind === "dc" ? sprite(kind, idx, px, c) : jagae(idx, px, 0.3, 4000, 0);
+  const cv = document.createElement("canvas"); cv.width = cv.height = src.width;
+  cv.getContext("2d").drawImage(src, 0, 0);
+  return cv.toDataURL("image/png");
 }
 
 window.MOTIFS = { dc: DC, jg: JG };
-window.MotifArt = { sprite, jagae, icon };
+window.MotifArt = { sprite, jagae, icon, SCHEMES: SCHEMES.map((x) => x.name) };
 })();

@@ -13,7 +13,7 @@ const KEEP_MS = 900;                   // 다 그려진 그림이 사라지기 �
 const FADE_K = 0.92;                   // 수묵: 한 장면마다 남는 먹 (약 1초에 걸쳐 사라진다)
 const FADE_MS = 1000;                  // 단청·자개: 사라지는 데 걸리는 시간
 const RATE_MIN = 0.25, RATE_MAX = 8;   // 소리 길이에 맞출 때 빠르기 한도
-const STORE = "ddgmaker-work-v2", OLD_STORE = "ddgmaker-work-v1", THUMBS = "ddgmaker-thumbs-v4";
+const STORE = "ddgmaker-work-v2", OLD_STORE = "ddgmaker-work-v1", THUMBS = "ddgmaker-thumbs-v5";
 const SOUND_BY_ID = new Map(SOUNDS.map((s, i) => [s.id, { ...s, index: i }]));
 const { LW, LH, STEP_MS } = Ink;
 
@@ -329,9 +329,10 @@ function applyPreset(b){ ui.water.value = b.dataset.w; ui.ink.value = b.dataset.
 presetBtns.forEach((b) => b.addEventListener("click", () => applyPreset(b)));
 showVals();
 
-// 문양 찍기 설정: 뱅크마다 고른 문양과 움직임을 따로 기억한다
-const mt = [null, { m: 0, a: 0 }, { m: 0, a: 0 }];
+// 문양 찍기 설정: 뱅크마다 고른 문양·움직임·빛깔(단청)·무리(홑 문양/이어 무늬)를 따로 기억한다
+const mt = [null, { m: 0, a: 0, c: 0, g: 0 }, { m: 0, a: 0, c: 0, g: 0 }];
 const mtSize = $("mt-size"), mtRot = $("mt-rot");
+const groupOf = (kind, i) => (MOTIFS[kind][i] && MOTIFS[kind][i].rep ? 1 : 0);
 function buildMotifTools(b){
   const kind = BANKS[b].kind, box = $("mt-pick");
   box.innerHTML = ""; box.dataset.kind = kind;
@@ -341,8 +342,17 @@ function buildMotifTools(b){
     btn.addEventListener("click", () => { mt[b].m = i; selectStamp(null); drawMotifTools(); });
     box.appendChild(btn);
   });
+  for (const el of document.querySelectorAll("#maker [data-only]")) el.hidden = el.dataset.only !== kind;
   drawMotifTools();
 }
+[...$("mt-group").children].forEach((btn, gi) => btn.addEventListener("click", () => {
+  const sel = mt[editBank];
+  if (!sel || sel.g === gi) return;
+  sel.g = gi;
+  const kind = BANKS[editBank].kind;   // 그 무리의 첫 문양을 고른다
+  sel.m = MOTIFS[kind].findIndex((m, i) => groupOf(kind, i) === gi);
+  selectStamp(null); drawMotifTools();
+}));
 (function buildAnimTools(){
   const box = $("mt-anim");
   Patterns.ANIMS.forEach((an, i) => {
@@ -357,11 +367,37 @@ function buildMotifTools(b){
     box.appendChild(btn);
   });
 })();
+// 빛깔 단추: 지금 문양을 그 빛깔로 그린 작은 그림
+let colFor = "";
+function drawColorTools(m){
+  const box = $("mt-col");
+  if (colFor !== String(m)){
+    colFor = String(m); box.innerHTML = "";
+    MotifArt.SCHEMES.forEach((name, c) => {
+      const btn = document.createElement("button"); btn.type = "button"; btn.title = name; btn.setAttribute("aria-label", name);
+      btn.innerHTML = `<img alt="" src="${MotifArt.icon("dc", m, 64, c)}">`;
+      btn.addEventListener("click", () => {
+        if (!editBank) return;
+        mt[editBank].c = c;
+        const st = selStamp();
+        if (st && (st.c || 0) !== c){ pushHistory(); st.c = c; changed(); }
+        drawMotifTools();
+      });
+      box.appendChild(btn);
+    });
+  }
+  return box;
+}
 function drawMotifTools(){
   const sel = mt[editBank];
   if (!sel) return;
-  [...$("mt-pick").children].forEach((btn, i) => btn.classList.toggle("on", i === sel.m));
+  const kind = BANKS[editBank].kind, st = selStamp();
+  const m = st ? st.m : sel.m;
+  sel.g = groupOf(kind, m);
+  [...$("mt-group").children].forEach((btn, i) => btn.classList.toggle("on", i === sel.g));
+  [...$("mt-pick").children].forEach((btn, i) => { btn.hidden = groupOf(kind, i) !== sel.g; btn.classList.toggle("on", i === m); });
   [...$("mt-anim").children].forEach((btn, i) => btn.classList.toggle("on", i === sel.a));
+  if (kind === "dc") [...drawColorTools(m).children].forEach((btn, i) => btn.classList.toggle("on", i === sel.c));
   $("mt-sizeV").textContent = mtSize.value; $("mt-rotV").textContent = mtRot.value + "°";
 }
 // 크기·돌림 막대: 고른 문양이 있으면 그 문양을, 없으면 다음에 찍을 문양을 바꾼다
@@ -386,7 +422,9 @@ function selectBank(b){
   for (const el of document.querySelectorAll("[data-tools]")) el.hidden = el.dataset.tools !== (BANKS[b].engine ? "stamp" : "ink");
   if (BANKS[b].engine) buildMotifTools(b);
   $("maker").dataset.bank = b;
-  hint.textContent = BANKS[b].engine ? "문양을 골라 종이에 찍어 보시게. 찍은 문양은 끌어 옮기고, 모서리 고리로 크기와 돌림을 바꾼다네" : "여기에 붓으로 그려 보시게";
+  hint.innerHTML = BANKS[b].engine
+    ? "<b>문양을 골라 종이에 찍어 보시게</b><small>찍은 문양은 끌어 옮기고<br>모서리 고리로 크기와 돌림을 바꾼다네</small>"
+    : "<b>여기에 붓으로 그려 보시게</b>";
   $("side-tip").textContent = "소리를 누르면 미리 들어 볼 수 있다네. 고른 뒤에는 왼쪽 종이에 이 소리에 어울리는 " + (BANKS[b].engine ? "문양을 찍어 보시게." : "붓질을 그려 보시게.");
   showBankOnStage(BANKS[b]);
   buildSoundPick();
@@ -580,7 +618,7 @@ const selStamp = () => (BANKS[editBank].engine && selIdx >= 0 ? keyOf(work, edit
 function selectStamp(i){
   selIdx = i == null ? -1 : i;
   const st = selStamp();
-  if (st){ mtSize.value = st.s; mtRot.value = st.r; mt[editBank].a = st.a; drawMotifTools(); }
+  if (st){ mtSize.value = st.s; mtRot.value = st.r; mt[editBank].a = st.a; mt[editBank].c = st.c || 0; drawMotifTools(); }
 }
 // 문양을 바꾼 뒤: 저장·미리보기 그림 (final이 거짓이면 끄는 중이라 저장만 미룬다)
 function changed(final = true){
@@ -661,6 +699,7 @@ function stampDown(e, b, stamps, now){
   }
   const sel = mt[b];
   const st = { m: sel.m, x: Math.round(p.x), y: Math.round(p.y), s: +mtSize.value, r: +mtRot.value, a: sel.a, t0: Math.round(t0) };
+  if (BANKS[b].kind === "dc" && sel.c) st.c = sel.c;
   stamps.push(st);
   BANKS[b].engine.add(editLayer, st, now);
   lastEndReal = now;
@@ -1003,7 +1042,7 @@ function unpackInk(r){
 }
 function packWork(w){
   const o = bytesWriter();
-  o.b(3);   // 형식 번호
+  o.b(4);   // 형식 번호
   const title = new TextEncoder().encode(w.title || "");
   o.u(title.length); for (const x of title) o.b(x);
   for (let b = 0; b < NB; b++){
@@ -1015,29 +1054,30 @@ function packWork(w){
       let t = 0;
       for (const st of k.strokes){
         if (!BANKS[b].engine){ packInk(o, st); continue; }
-        o.b(st.m); o.b(st.a); o.u(st.x); o.u(st.y); o.u(st.s); o.u(st.r); o.u(st.t0 - t); t = st.t0;
+        o.b(st.m); o.b(st.a); o.b(st.c || 0); o.u(st.x); o.u(st.y); o.u(st.s); o.u(st.r); o.u(st.t0 - t); t = st.t0;
       }
     }
   }
   return new Uint8Array(o.a);
 }
-// 형식 1: 수묵 뱅크만. 형식 2: 단청·자개가 붓으로 그리던 때 — 수묵만 읽고 나머지는 버린다. 형식 3: 지금.
+// 형식 1: 수묵 뱅크만. 형식 2: 단청·자개가 붓으로 그리던 때 — 수묵만 읽고 나머지는 버린다. 형식 3: 빛깔 없음. 형식 4: 지금.
 function unpackWork(buf){
   const r = bytesReader(buf);
   const ver = r.b();
-  if (ver < 1 || ver > 3) throw new Error("모르는 형식");
+  if (ver < 1 || ver > 4) throw new Error("모르는 형식");
   const tl = r.u(), tb = new Uint8Array(tl);
   for (let i = 0; i < tl; i++) tb[i] = r.b();
   const w = { title: new TextDecoder().decode(tb), banks: [] };
-  for (let b = 0; b < (ver === 3 ? NB : 1); b++){
+  for (let b = 0; b < (ver >= 3 ? NB : 1); b++){
     const keys = {};
     for (const c of GRID){
       const si = r.u(), fit = r.b() & 1, ns = r.u(), strokes = [];
       let t = 0;
       for (let s = 0; s < ns; s++){
         if (!BANKS[b].engine){ strokes.push(unpackInk(r)); continue; }
-        const m = r.b(), a = r.b();
+        const m = r.b(), a = r.b(), c = ver >= 4 ? r.b() : 0;
         const st = { m, x: r.u(), y: r.u(), s: r.u(), r: r.u(), a };
+        if (c) st.c = c;
         st.t0 = t += r.u();
         strokes.push(st);
       }
