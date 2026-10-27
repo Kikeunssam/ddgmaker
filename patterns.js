@@ -1,5 +1,5 @@
 // 단청·자개 문양 찍기.
-// 둥당기 1편의 단청·자개 문양을 도장처럼 찍고, 찍은 문양마다 고른 움직임으로 나타난다.
+// motifs.js가 그린 단청·자개 문양을 도장처럼 찍고, 찍은 문양마다 고른 움직임으로 나타난다.
 // 찍은 기록 하나: { m: 문양 번호, x, y: 가운데, s: 크기(긴 쪽 px), r: 돌림(도), a: 움직임 번호, t0: 나타나는 때(ms) }
 // 그림 한 장(layer)에 문양을 넣고(add), draw로 화면에 옮긴다. 다시 그리기는 makeReplay가 시간에 맞춰 넣는다.
 (() => {
@@ -8,22 +8,6 @@ const { LW, LH } = Ink;
 
 const ANIM_MS = 900;   // 문양 하나가 다 나타나는 데 걸리는 시간
 const GAP_MIN = 60, GAP_MAX = 600;   // 찍는 사이 쉬는 시간 (기록할 때 이 안으로 줄인다)
-
-// ---------- 문양 그림 ----------
-// 파일로 바로 열면(file://) motifs.js에 담긴 그림을 쓴다 (그래야 미리보기 그림을 저장할 수 있다).
-const imgs = {}, waiting = [];
-let pending = 0;
-function img(id){
-  if (imgs[id]) return imgs[id];
-  const im = new Image();
-  pending++;
-  im.onload = im.onerror = () => { if (--pending === 0) waiting.splice(0).forEach((f) => f()); };
-  im.src = (location.protocol === "file:" && window.MOTIF_DATA && MOTIF_DATA[id]) || `assets/motifs/${id}.webp`;
-  return (imgs[id] = im);
-}
-for (const kind in MOTIFS) MOTIFS[kind].forEach((m) => img(m.id));
-const ready = () => pending === 0;
-const whenReady = (f) => (ready() ? f() : waiting.push(f));
 
 // ---------- 움직임 ----------
 // u: 나타나는 정도 0→1, live: 다 나타난 뒤에도 계속되는 움직임용 시계(ms), ph: 문양마다 다른 박자
@@ -53,21 +37,21 @@ const ANIMS = [
   { name: "반짝반짝", f: (u, live, ph) => ({ al: clamp01(u * 1.5) * (u < 1 ? 0.55 + 0.45 * Math.abs(Math.sin(u * 14)) : 1), glow: 0.5 + 0.5 * Math.sin(live * 0.006 + ph) }) },
 ];
 
-function drawStamp(ctx, kind, st, age, live){
-  const m = MOTIFS[kind][st.m];
-  const im = m && img(m.id);
-  if (!im || !im.complete || !im.naturalWidth) return;
+// base: 그림 판의 실제 픽셀 / 논리 크기(1200×750) 비율. 문양은 화면에 보이는 크기에 맞춘 그림으로 그린다.
+function drawStamp(ctx, kind, st, age, live, base = 1){
   const u = clamp01(age / ANIM_MS);
   const ph = (st.x * 0.013 + st.y * 0.007) % 6.283;
   const o = (ANIMS[st.a] || ANIMS[0]).f(u, live, ph);
   const al = o.al == null ? 1 : o.al, k = o.k == null ? 1 : o.k;
   if (al <= 0.003 || k <= 0.003) return;
-  const sc = st.s / Math.max(im.naturalWidth, im.naturalHeight) * k;
-  const w = im.naturalWidth, h = im.naturalHeight;
+  const im = MotifArt.sprite(kind, st.m, st.s * base);   // 움직이는 동안 크기가 바뀌어도 같은 그림을 쓴다
+  if (!im) return;
+  const w = im.width, h = im.height;
+  const sc = st.s / w * k * base;
   const a = st.r * Math.PI / 180 + (o.rot || 0);
   const c = Math.cos(a) * sc, s = Math.sin(a) * sc;
   ctx.save();
-  ctx.setTransform(c, s, -s, c, st.x + (o.dx || 0), st.y + (o.dy || 0));
+  ctx.setTransform(c, s, -s, c, (st.x + (o.dx || 0)) * base, (st.y + (o.dy || 0)) * base);
   ctx.globalAlpha *= al;
   if (o.wipe != null){
     if (o.wipe <= 0){ ctx.restore(); return; }
@@ -91,8 +75,8 @@ function makeEngine(kind){
     clear(L){ L.items.length = 0; },
     add(L, st, rb){ const it = { st, age: 0, rb: rb == null ? null : rb }; L.items.push(it); return it; },
     pop(L){ L.items.pop(); },
-    draw(ctx, L, now){
-      for (const it of L.items) drawStamp(ctx, kind, it.st, it.rb != null ? now - it.rb : it.age, now);
+    draw(ctx, L, now, base = 1){
+      for (const it of L.items) drawStamp(ctx, kind, it.st, it.rb != null ? now - it.rb : it.age, now, base);
     },
   };
 }
@@ -120,5 +104,5 @@ function makeReplay(engine, stamps, L){
   };
 }
 
-window.Patterns = { dancheong, jagae, ANIMS, ANIM_MS, GAP_MIN, GAP_MAX, img, ready, whenReady, stampsLength, makeReplay };
+window.Patterns = { dancheong, jagae, ANIMS, ANIM_MS, GAP_MIN, GAP_MAX, stampsLength, makeReplay };
 })();

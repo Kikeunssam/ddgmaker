@@ -13,7 +13,7 @@ const KEEP_MS = 900;                   // 다 그려진 그림이 사라지기 �
 const FADE_K = 0.92;                   // 수묵: 한 장면마다 남는 먹 (약 1초에 걸쳐 사라진다)
 const FADE_MS = 1000;                  // 단청·자개: 사라지는 데 걸리는 시간
 const RATE_MIN = 0.25, RATE_MAX = 8;   // 소리 길이에 맞출 때 빠르기 한도
-const STORE = "ddgmaker-work-v2", OLD_STORE = "ddgmaker-work-v1", THUMBS = "ddgmaker-thumbs-v3";
+const STORE = "ddgmaker-work-v2", OLD_STORE = "ddgmaker-work-v1", THUMBS = "ddgmaker-thumbs-v4";
 const SOUND_BY_ID = new Map(SOUNDS.map((s, i) => [s.id, { ...s, index: i }]));
 const { LW, LH, STEP_MS } = Ink;
 
@@ -155,7 +155,16 @@ document.addEventListener("visibilitychange", () => {
 // 수묵은 먹이 번지는 격자(ic), 단청·자개는 그림 판(vc)에 그린다.
 const stage = $("stage"), ic = $("inkc"), vc = $("vecc"), hint = $("hint");
 const vctx = vc.getContext("2d");
-vc.width = LW; vc.height = LH;
+// 문양 판은 화면에 보이는 크기(기기 픽셀)에 맞춰 크게 만든다 (크게 보여도 깨지지 않게)
+let vbase = 1;
+function fitVec(){
+  const r = stage.getBoundingClientRect();
+  const b = Math.max(1, Math.min(3, (r.width || LW) * (window.devicePixelRatio || 1) / LW));
+  if (Math.abs(b - vbase) < 0.01 && vc.width === Math.round(LW * b)) return;
+  vbase = b; vc.width = Math.round(LW * b); vc.height = Math.round(LH * b);
+}
+fitVec();
+addEventListener("resize", fitVec);
 const papers = {};
 for (const t of ["ink", "white", "black", "gray"]){
   const pc = document.createElement("canvas"); pc.className = "paper"; pc.dataset.tone = t;
@@ -237,17 +246,18 @@ function frame(now){
 // 단청·자개 그림 판을 화면에 옮긴다
 function drawVec(now){
   if (vc.hidden) return;
+  fitVec();
   vctx.setTransform(1, 0, 0, 1, 0, 0);
-  vctx.clearRect(0, 0, LW, LH);
+  vctx.clearRect(0, 0, vc.width, vc.height);
   if (mode === "make"){
-    if (editLayer && BANKS[editBank].engine) BANKS[editBank].engine.draw(vctx, editLayer, now);
+    if (editLayer && BANKS[editBank].engine) BANKS[editBank].engine.draw(vctx, editLayer, now, vbase);
     return;
   }
   vreplays = vreplays.filter((r) => {
     const a = r.done && sim.clock > r.keep ? 1 - (sim.clock - r.keep) / FADE_MS : 1;
     if (a <= 0) return false;
     vctx.globalAlpha = a;
-    r.engine.draw(vctx, r.L, now);
+    r.engine.draw(vctx, r.L, now, vbase);
     return true;
   });
   vctx.globalAlpha = 1;
@@ -275,7 +285,6 @@ function thumbOfLayer(engine, L){
 function bakeThumb(b, strokes){
   const bank = BANKS[b];
   if (bank.kind === "ink"){ Ink.bake(strokes, bakeSim); return thumbOfCanvas(bakeSim.canvas); }
-  if (!Patterns.ready()) return null;
   const L = bank.engine.newLayer();
   Patterns.makeReplay(bank.engine, strokes, L).to(Infinity);
   return thumbOfLayer(bank.engine, L);
@@ -327,7 +336,7 @@ function buildMotifTools(b){
   box.innerHTML = ""; box.dataset.kind = kind;
   MOTIFS[kind].forEach((m, i) => {
     const btn = document.createElement("button"); btn.type = "button"; btn.title = m.name;
-    btn.innerHTML = `<img alt="" src="${Patterns.img(m.id).src}"><span>${m.name}</span>`;
+    btn.innerHTML = `<img alt="" src="${MotifArt.icon(kind, i)}"><span>${m.name}</span>`;
     btn.addEventListener("click", () => { mt[b].m = i; drawMotifTools(); });
     box.appendChild(btn);
   });
@@ -601,6 +610,8 @@ function enterPlay(w, from){
   $("play").appendChild(stage);
   hint.style.opacity = 0;
   setPlayBank(0, false);
+  fitVec();   // 문양 그림을 연주 화면 크기로 미리 그려 둔다 (처음 누를 때 멈칫하지 않게)
+  BANKS.forEach((bank, b) => { if (bank.engine) for (const c of GRID) for (const st of keyOf(playing, b, c).strokes) MotifArt.sprite(bank.kind, st.m, st.s * vbase); });
   for (const bk of playing.banks) for (const c of GRID) ensureSound(bk.keys[c].snd).catch(() => {});
 }
 // 섞음: 들어올 때마다 뱅크 1·2·3에서 9·9·8개(8개 뱅크는 무작위)를 겹치지 않게 골라 26자판에 섞어 놓는다.

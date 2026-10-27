@@ -829,3 +829,6 @@ body { background: #efe7d6 url("assets/hanji_dak.jpg") center / cover fixed; }
 #maker .under button.icon { width: 40px; height: 36px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
 #maker .under button.icon svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 #maker button[hidden] { display: none; }
+
+/* 단청은 흰 한지에 스민 것처럼 (종이 결이 안료 밑으로 비친다) */
+#stage[data-tone="white"] #vecc { mix-blend-mode: multiply; }
