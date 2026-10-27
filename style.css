@@ -864,3 +864,44 @@ body { background: #efe7d6 url("assets/hanji_dak.jpg") center / cover fixed; }
 #go-home { color: inherit; text-decoration: none; }
 #go-home:hover { color: var(--red); }
 .card.small .close .btn { white-space: nowrap; min-width: 150px; }
+
+/* ---------- 자판 칸: 글자 · 그림 · 소리 이름이 겹치지 않게 자리를 나눈다 ----------
+   칸 크기에 맞춰 함께 줄어들도록 칸 너비(cqw) 기준으로 잰다.
+   왼쪽 위: 글자 패, 오른쪽: 그림, 아래: 소리 이름 띠 (칸이 아주 작으면 이름은 숨긴다) */
+.kt { container-type: inline-size; --strip: 22cqw; }
+.kt img {
+  left: 42cqw; top: 5cqw;
+  width: 54cqw; height: calc(75cqw - var(--strip) - 9cqw);
+  object-fit: contain;
+}
+.kt b {
+  left: 5cqw; top: 5cqw;
+  width: 34cqw; height: 34cqw; min-width: 0;
+  padding: 0 !important;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 44cqw; line-height: 1;
+  overflow: hidden;
+  background: rgba(243, 235, 217, 0.92);
+  border: 1px solid rgba(31, 33, 36, 0.22);
+  border-radius: 2px;
+}
+.kt.drawn b { height: 34cqw; line-height: 1; background: var(--red); border-color: var(--red); color: #f6efe4; }
+.kt span {
+  left: 0; right: 0; bottom: 0; top: auto;
+  height: var(--strip); line-height: var(--strip);
+  max-width: none; padding: 0 4cqw; border-radius: 0;
+  text-align: center; font-size: max(9px, 12cqw);
+  background: rgba(31, 33, 36, 0.06);
+  border-top: 1px solid rgba(31, 33, 36, 0.14);
+}
+.kt::after { inset: 3px 3px calc(var(--strip) + 3px) 3px; }
+@container (max-width: 46px){
+  .kt span { display: none; }
+  .kt::after { inset: 3px; }
+  .kt b, .kt.drawn b { width: 44cqw; height: 44cqw; font-size: 56cqw; }
+  .kt img { height: 65cqw; }
+}
+#maker[data-bank="1"] .kt b { background: rgba(250, 248, 242, 0.95); }
+#maker[data-bank="1"] .kt.drawn b, #maker[data-bank="2"] .kt.drawn b { background: var(--red); color: #f6efe4; }
+#maker[data-bank="2"] .kt b { background: rgba(26, 25, 24, 0.9); border-color: rgba(255, 255, 255, 0.25); color: #f1eadc; }
+#maker[data-bank="2"] .kt span { background: rgba(255, 255, 255, 0.06); border-top-color: rgba(255, 255, 255, 0.14); color: #cfc6b6; }

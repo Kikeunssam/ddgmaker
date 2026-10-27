@@ -13,7 +13,7 @@ const KEEP_MS = 900;                   // 다 그려진 그림이 사라지기 �
 const FADE_K = 0.92;                   // 수묵: 한 장면마다 남는 먹 (약 1초에 걸쳐 사라진다)
 const FADE_MS = 1000;                  // 단청·자개: 사라지는 데 걸리는 시간
 const RATE_MIN = 0.25, RATE_MAX = 8;   // 소리 길이에 맞출 때 빠르기 한도
-const STORE = "ddgmaker-work-v2", OLD_STORE = "ddgmaker-work-v1", THUMBS = "ddgmaker-thumbs-v5";
+const STORE = "ddgmaker-work-v2", OLD_STORE = "ddgmaker-work-v1", THUMBS = "ddgmaker-thumbs-v6";
 const SOUND_BY_ID = new Map(SOUNDS.map((s, i) => [s.id, { ...s, index: i }]));
 const { LW, LH, STEP_MS } = Ink;
 
@@ -266,13 +266,32 @@ function drawVec(now){
 
 // ---------- 미리보기 그림 ----------
 const thumbCanvas = document.createElement("canvas");
-thumbCanvas.width = 240; thumbCanvas.height = 150;
+thumbCanvas.width = 200; thumbCanvas.height = 160;
 const tctx = thumbCanvas.getContext("2d");
 const tkey = (b, c) => b + c;
+// 미리보기: 그림이 있는 곳만 잘라 칸에 크게 보이게 한다
+const probe = Object.assign(document.createElement("canvas"), { width: 160, height: 100 });
+function inkBox(canvas){
+  const g = probe.getContext("2d", { willReadFrequently: true });
+  g.clearRect(0, 0, 160, 100); g.drawImage(canvas, 0, 0, 160, 100);
+  const d = g.getImageData(0, 0, 160, 100).data;
+  let x0 = 160, y0 = 100, x1 = -1, y1 = -1;
+  for (let y = 0; y < 100; y++) for (let x = 0; x < 160; x++) if (d[(y * 160 + x) * 4 + 3] > 16){
+    if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+  }
+  if (x1 < 0) return null;
+  const kx = canvas.width / 160, ky = canvas.height / 100, pad = 3;
+  return { x: Math.max(0, x0 - pad) * kx, y: Math.max(0, y0 - pad) * ky, w: (Math.min(160, x1 + 1 + pad) - Math.max(0, x0 - pad)) * kx, h: (Math.min(100, y1 + 1 + pad) - Math.max(0, y0 - pad)) * ky };
+}
 function thumbOfCanvas(canvas){
+  const W = thumbCanvas.width, H = thumbCanvas.height;
   tctx.setTransform(1, 0, 0, 1, 0, 0);
-  tctx.clearRect(0, 0, 240, 150);
-  tctx.drawImage(canvas, 0, 0, 240, 150);
+  tctx.clearRect(0, 0, W, H);
+  const r = inkBox(canvas);
+  if (r){
+    const k = Math.min(W / r.w, H / r.h), w = r.w * k, h = r.h * k;
+    tctx.drawImage(canvas, r.x, r.y, r.w, r.h, (W - w) / 2, (H - h) / 2, w, h);
+  }
   return thumbCanvas.toDataURL("image/png");
 }
 // 문양은 setTransform으로 그리므로 큰 판에 그린 뒤 줄여서 옮긴다
