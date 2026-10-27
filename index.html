@@ -43,7 +43,7 @@
   <!-- 만들기 화면 -->
   <div id="maker" hidden>
     <header class="bar">
-      <h1>둥당기 만들기</h1>
+      <h1><a href="./" id="go-home" title="첫 화면으로">둥당기 만들기</a></h1>
       <nav id="bank-tabs">
         <button type="button" class="on"><em>一</em>수묵</button>
         <button type="button"><em>二</em>단청</button>
@@ -90,6 +90,7 @@
           <button type="button" id="undo" class="icon" title="되돌리기 (⌘Z)" aria-label="되돌리기"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg></button>
           <button type="button" id="redo" class="icon" title="다시 하기 (⇧⌘Z)" aria-label="다시 하기"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></svg></button>
           <button type="button" id="clear-key">이 자판 그림 지우기</button>
+          <button type="button" id="clear-all" class="danger">전체 자판 초기화하기</button>
           <span class="spacer"></span>
           <span id="dur"></span>
         </div>
@@ -140,6 +141,19 @@
       <div class="close">
         <button type="button" id="share-copy" class="btn primary"><span>복사하기</span></button>
         <button type="button" id="share-close" class="btn"><span>닫기</span></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 전체 자판 초기화 확인 -->
+  <div id="reset" class="veil" hidden>
+    <div class="card small" role="alertdialog" aria-modal="true" aria-labelledby="reset-title" aria-describedby="reset-text">
+      <h2 id="reset-title">전체 자판 초기화</h2>
+      <p class="s" id="reset-text"></p>
+      <p class="note">고른 소리와 작품 이름은 그대로 둔다네. 지운 뒤에도 자판마다 되돌리기로 살릴 수 있으나, 새로 고침하면 살릴 수 없다네.</p>
+      <div class="close">
+        <button type="button" id="reset-cancel" class="btn"><span>그만두기</span></button>
+        <button type="button" id="reset-ok" class="btn danger"><span>모두 지우기</span></button>
       </div>
     </div>
   </div>

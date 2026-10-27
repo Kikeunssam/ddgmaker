@@ -483,6 +483,7 @@ function drawSide(){
   $("fit").checked = k.fit;
   refreshFit();
   $("undo").disabled = $("clear-key").disabled = $("replay").disabled = !k.strokes.length;
+  $("clear-all").disabled = !drawnKeys().length;
   $("undo").disabled = !k.strokes.length && !histOf().undo.length;
   $("redo").disabled = !histOf().redo.length;
 }
@@ -574,6 +575,24 @@ $("clear-key").addEventListener("click", () => {
   const c = cur[editBank], k = keyOf(work, editBank, c); if (!k.strokes.length) return;
   if (!confirm(`${JAMO[c]} 자판의 ${BANKS[editBank].engine ? "문양" : "그림"}을 모두 지우겠는가?`)) return;
   pushHistory(); k.strokes = []; selectStamp(null); save(); showKeyDrawing(c); setThumb(editBank, c, null); drawSide();
+});
+// 전체 자판 초기화: 세 뱅크 모든 자판의 그림을 지운다 (확인 창을 한 번 더 거친다)
+function drawnKeys(){ const out = []; work.banks.forEach((bk, b) => GRID.forEach((c) => bk.keys[c].strokes.length && out.push([b, c]))); return out; }
+$("clear-all").addEventListener("click", () => {
+  const n = drawnKeys().length;
+  if (!n){ toast("지울 그림이 없다네"); return; }
+  $("reset-text").textContent = `수묵·단청·자개 세 뱅크에서 그림이 담긴 자판 ${n}개를 모두 비우겠는가?`;
+  openVeil($("reset"), $("reset-cancel"));   // 실수로 Enter를 눌러도 지워지지 않게 '그만두기'에 둔다
+});
+$("reset-cancel").addEventListener("click", () => closeVeil($("reset")));
+$("reset-ok").addEventListener("click", () => {
+  if (active) endStroke({ pointerId: active.id, force: true });
+  finishReplays();
+  for (const [b, c] of drawnKeys()){ pushHistory(b, c); keyOf(work, b, c).strokes = []; setThumb(b, c, null); }
+  closeVeil($("reset"));
+  selectStamp(null); save(); showKeyDrawing(cur[editBank]); drawTiles(); drawSide();
+  lastEndReal = 0;
+  toast("모든 자판을 비웠다네");
 });
 $("title").addEventListener("input", () => { work.title = $("title").value.slice(0, 30); save(); });
 
@@ -903,6 +922,14 @@ function leaveStart(then){
   setTimeout(() => { startEl.hidden = true; startPhase = "gone"; }, 700);
 }
 $("start-make").addEventListener("click", () => leaveStart(enterMake));
+// 만들기 화면 제목을 누르면 첫 화면으로 (만들던 작품은 그대로 남는다)
+$("go-home").addEventListener("click", (e) => {
+  e.preventDefault();
+  if (mode !== "make") return;
+  if (active) endStroke({ pointerId: active.id, force: true });
+  finishReplays(); selectStamp(null); save();
+  mode = "start"; showStart();
+});
 $("start-play").addEventListener("click", () => leaveStart(() => enterPlay(shared, "start")));
 $("start-remix").addEventListener("click", () => {
   if (hasDrawing(work) && !confirm("지금 만들던 작품 대신 이 작품을 고쳐 만들겠는가?\n(만들던 작품은 지워진다네)")) return;
@@ -927,7 +954,7 @@ const openHelp = () => openVeil($("help"), $("help-close"));
 for (const b of document.querySelectorAll(".start-help")) b.addEventListener("click", openHelp);
 $("open-help").addEventListener("click", openHelp);
 $("help-close").addEventListener("click", () => closeVeil($("help")));
-for (const v of [$("help"), $("share")]){
+for (const v of [$("help"), $("share"), $("reset")]){
   v.addEventListener("click", (e) => e.target === v && closeVeil(v));
   v.addEventListener("pointerdown", (e) => e.stopPropagation());
 }
@@ -956,11 +983,11 @@ $("share-close").addEventListener("click", () => closeVeil($("share")));
 addEventListener("keydown", (e) => {
   // 만들기: ⌘Z 되돌리기, ⇧⌘Z 다시 하기 (그 밖의 ⌘R 등 브라우저 단축키는 그대로)
   if (mode === "make" && (e.metaKey || e.ctrlKey) && e.code === "KeyZ"
-      && $("help").hidden && $("share").hidden && !(e.target.matches && e.target.matches("input, textarea"))){
+      && $("help").hidden && $("share").hidden && $("reset").hidden && !(e.target.matches && e.target.matches("input, textarea"))){
     e.preventDefault(); if (e.shiftKey) redo(); else undo(); return;
   }
   if (e.metaKey || e.ctrlKey || e.altKey) return;
-  const veil = !$("help").hidden ? $("help") : !$("share").hidden ? $("share") : null;
+  const veil = [$("help"), $("share"), $("reset")].find((v) => !v.hidden) || null;
   if (veil){
     if (e.key === "Escape") closeVeil(veil);
     return;

@@ -849,3 +849,17 @@ body { background: #efe7d6 url("assets/hanji_dak.jpg") center / cover fixed; }
 #maker .cols button { padding: 2px; width: 34px; height: 34px; display: grid; place-items: center; }
 .cols img { width: 28px; height: 28px; pointer-events: none; }
 #maker .cols button.on { background: var(--paper); border-color: var(--red); box-shadow: 0 0 0 2px var(--red); }
+
+/* 전체 자판 초기화 */
+#maker button.danger { color: var(--red); border-color: #d9a59e; }
+#maker button.danger:hover:not(:disabled) { border-color: var(--red); background: #f7e7e2; }
+.card.small { width: min(460px, 100%); }
+.btn.danger { color: #fff; }
+.btn.danger::before { background: var(--red); }
+.btn.danger::after { background: var(--red); inset: 0; }
+.btn.danger:hover::after, .btn.danger:focus-visible::after { background: #9c2a20; }
+
+/* 제목: 첫 화면으로 */
+#go-home { color: inherit; text-decoration: none; }
+#go-home:hover { color: var(--red); }
+.card.small .close .btn { white-space: nowrap; min-width: 150px; }
