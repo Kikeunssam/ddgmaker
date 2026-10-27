@@ -824,3 +824,8 @@ body { background: #efe7d6 url("assets/hanji_dak.jpg") center / cover fixed; }
 #play[data-tone="white"] { background: #e6e2d8; }
 #play[data-tone="black"] { background: #0b0b0a; }
 #play[data-tone="gray"] { background: #3c3b37; }
+
+/* 단청·자개 되돌리기 · 다시 하기 */
+#maker .under button.icon { width: 40px; height: 36px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+#maker .under button.icon svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+#maker button[hidden] { display: none; }

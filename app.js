@@ -363,7 +363,8 @@ function selectBank(b){
   if (BANKS[b].engine) buildMotifTools(b);
   $("maker").dataset.bank = b;
   hint.textContent = BANKS[b].engine ? "문양을 골라 종이에 찍어 보시게 (누른 채 끌면 크기와 돌림이 바뀐다네)" : "여기에 붓으로 그려 보시게";
-  $("undo").textContent = BANKS[b].engine ? "문양 하나 지우기" : "한 획 지우기";
+  $("undo").hidden = !!BANKS[b].engine;
+  $("s-undo").hidden = $("s-redo").hidden = !BANKS[b].engine;
   $("side-tip").textContent = "소리를 누르면 미리 들어 볼 수 있다네. 고른 뒤에는 왼쪽 종이에 이 소리에 어울리는 " + (BANKS[b].engine ? "문양을 찍어 보시게." : "붓질을 그려 보시게.");
   showBankOnStage(BANKS[b]);
   buildSoundPick();
@@ -421,7 +422,8 @@ function drawSide(){
   for (const b of $("sound-pick").querySelectorAll("button")) b.classList.toggle("on", (b.dataset.id || null) === k.snd);
   $("fit").checked = k.fit;
   refreshFit();
-  $("undo").disabled = $("clear-key").disabled = $("replay").disabled = !k.strokes.length;
+  $("undo").disabled = $("s-undo").disabled = $("clear-key").disabled = $("replay").disabled = !k.strokes.length;
+  $("s-redo").disabled = !(redoStack[tkey(editBank, cur[editBank])] || []).length;
 }
 function refreshFit(){
   if (mode !== "make") return;
@@ -486,10 +488,35 @@ $("undo").addEventListener("click", () => {
   setThumb(editBank, c, k.strokes.length ? bakeThumb(editBank, k.strokes) : null); drawSide();
   lastEndReal = 0;
 });
+// 단청·자개: 되돌리기·다시 하기. 되돌린 문양은 자판마다 따로 모아 두고, 새로 찍으면 버린다.
+const redoStack = {};
+function stampUndo(){
+  const b = editBank, c = cur[b], k = keyOf(work, b, c);
+  if (!BANKS[b].engine || !k.strokes.length) return;
+  if (active) endStroke({ pointerId: active.id });
+  finishReplays();
+  (redoStack[tkey(b, c)] = redoStack[tkey(b, c)] || []).push(k.strokes.pop());
+  save(); BANKS[b].engine.pop(editLayer); hint.style.opacity = k.strokes.length ? 0 : 1;
+  setThumb(b, c, k.strokes.length ? bakeThumb(b, k.strokes) : null); drawSide();
+  lastEndReal = 0;
+}
+function stampRedo(){
+  const b = editBank, c = cur[b], k = keyOf(work, b, c), stack = redoStack[tkey(b, c)];
+  if (!BANKS[b].engine || !stack || !stack.length) return;
+  if (active) endStroke({ pointerId: active.id });
+  finishReplays();
+  const st = stack.pop();
+  k.strokes.push(st); save();
+  BANKS[b].engine.add(editLayer, st, performance.now());   // 다시 나타나는 움직임을 보여 준다
+  hint.style.opacity = 0; drawSide(); drawTile(c); scheduleThumb(b, c);
+  lastEndReal = 0;
+}
+$("s-undo").addEventListener("click", stampUndo);
+$("s-redo").addEventListener("click", stampRedo);
 $("clear-key").addEventListener("click", () => {
   const c = cur[editBank], k = keyOf(work, editBank, c); if (!k.strokes.length) return;
   if (!confirm(`${JAMO[c]} 자판의 ${BANKS[editBank].engine ? "문양" : "그림"}을 모두 지우겠는가?`)) return;
-  k.strokes = []; save(); showKeyDrawing(c); setThumb(editBank, c, null); drawSide();
+  k.strokes = []; delete redoStack[tkey(editBank, c)]; save(); showKeyDrawing(c); setThumb(editBank, c, null); drawSide();
 });
 $("title").addEventListener("input", () => { work.title = $("title").value.slice(0, 30); save(); });
 
@@ -532,6 +559,7 @@ function startStamp(e, b, stamps, now){
   }
   const st = { m: sel.m, x: Math.round(p.x), y: Math.round(p.y), s: +mtSize.value, r: +mtRot.value, a: sel.a, t0: Math.round(t0) };
   stamps.push(st);
+  delete redoStack[tkey(b, cur[b])];
   BANKS[b].engine.add(editLayer, st, now);
   lastEndReal = now;
   active = { stamp: true, st, x0: p.x, y0: p.y, s0: st.s, r0: st.r, id: e.pointerId, b, code: cur[b] };
@@ -739,7 +767,12 @@ $("share-close").addEventListener("click", () => closeVeil($("share")));
 
 // ---------- 자판 ----------
 addEventListener("keydown", (e) => {
-  if (e.metaKey || e.ctrlKey || e.altKey) return;   // ⌘R 등 브라우저 단축키는 그대로
+  // 단청·자개 만들기: ⌘Z 되돌리기, ⇧⌘Z 다시 하기 (그 밖의 ⌘R 등 브라우저 단축키는 그대로)
+  if (mode === "make" && BANKS[editBank].engine && (e.metaKey || e.ctrlKey) && e.code === "KeyZ"
+      && $("help").hidden && $("share").hidden && !(e.target.matches && e.target.matches("input, textarea"))){
+    e.preventDefault(); if (e.shiftKey) stampRedo(); else stampUndo(); return;
+  }
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
   const veil = !$("help").hidden ? $("help") : !$("share").hidden ? $("share") : null;
   if (veil){
     if (e.key === "Escape") closeVeil(veil);
