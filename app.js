@@ -363,8 +363,6 @@ function selectBank(b){
   if (BANKS[b].engine) buildMotifTools(b);
   $("maker").dataset.bank = b;
   hint.textContent = BANKS[b].engine ? "문양을 골라 종이에 찍어 보시게 (누른 채 끌면 크기와 돌림이 바뀐다네)" : "여기에 붓으로 그려 보시게";
-  $("undo").hidden = !!BANKS[b].engine;
-  $("s-undo").hidden = $("s-redo").hidden = !BANKS[b].engine;
   $("side-tip").textContent = "소리를 누르면 미리 들어 볼 수 있다네. 고른 뒤에는 왼쪽 종이에 이 소리에 어울리는 " + (BANKS[b].engine ? "문양을 찍어 보시게." : "붓질을 그려 보시게.");
   showBankOnStage(BANKS[b]);
   buildSoundPick();
@@ -422,8 +420,8 @@ function drawSide(){
   for (const b of $("sound-pick").querySelectorAll("button")) b.classList.toggle("on", (b.dataset.id || null) === k.snd);
   $("fit").checked = k.fit;
   refreshFit();
-  $("undo").disabled = $("s-undo").disabled = $("clear-key").disabled = $("replay").disabled = !k.strokes.length;
-  $("s-redo").disabled = !(redoStack[tkey(editBank, cur[editBank])] || []).length;
+  $("undo").disabled = $("clear-key").disabled = $("replay").disabled = !k.strokes.length;
+  $("redo").disabled = !(redoStack[tkey(editBank, cur[editBank])] || []).length;
 }
 function refreshFit(){
   if (mode !== "make") return;
@@ -482,37 +480,34 @@ function preview(code){
 }
 
 $("replay").addEventListener("click", () => preview(cur[editBank]));
-$("undo").addEventListener("click", () => {
-  const c = cur[editBank], k = keyOf(work, editBank, c); if (!k.strokes.length) return;
-  k.strokes.pop(); save(); showKeyDrawing(c);
-  setThumb(editBank, c, k.strokes.length ? bakeThumb(editBank, k.strokes) : null); drawSide();
-  lastEndReal = 0;
-});
-// 단청·자개: 되돌리기·다시 하기. 되돌린 문양은 자판마다 따로 모아 두고, 새로 찍으면 버린다.
+// 되돌리기·다시 하기: 되돌린 획·문양은 자판마다 따로 모아 두고, 새로 그리거나 찍으면 버린다.
 const redoStack = {};
-function stampUndo(){
+function undo(){
   const b = editBank, c = cur[b], k = keyOf(work, b, c);
-  if (!BANKS[b].engine || !k.strokes.length) return;
+  if (!k.strokes.length) return;
   if (active) endStroke({ pointerId: active.id });
   finishReplays();
   (redoStack[tkey(b, c)] = redoStack[tkey(b, c)] || []).push(k.strokes.pop());
-  save(); BANKS[b].engine.pop(editLayer); hint.style.opacity = k.strokes.length ? 0 : 1;
+  save();
+  if (BANKS[b].engine){ BANKS[b].engine.pop(editLayer); hint.style.opacity = k.strokes.length ? 0 : 1; }
+  else showKeyDrawing(c);
   setThumb(b, c, k.strokes.length ? bakeThumb(b, k.strokes) : null); drawSide();
   lastEndReal = 0;
 }
-function stampRedo(){
+function redo(){
   const b = editBank, c = cur[b], k = keyOf(work, b, c), stack = redoStack[tkey(b, c)];
-  if (!BANKS[b].engine || !stack || !stack.length) return;
+  if (!stack || !stack.length) return;
   if (active) endStroke({ pointerId: active.id });
   finishReplays();
   const st = stack.pop();
   k.strokes.push(st); save();
-  BANKS[b].engine.add(editLayer, st, performance.now());   // 다시 나타나는 움직임을 보여 준다
-  hint.style.opacity = 0; drawSide(); drawTile(c); scheduleThumb(b, c);
+  if (BANKS[b].engine){ BANKS[b].engine.add(editLayer, st, performance.now()); hint.style.opacity = 0; }   // 문양은 다시 나타나는 움직임을 보여 준다
+  else showKeyDrawing(c);
+  drawSide(); drawTile(c); scheduleThumb(b, c);
   lastEndReal = 0;
 }
-$("s-undo").addEventListener("click", stampUndo);
-$("s-redo").addEventListener("click", stampRedo);
+$("undo").addEventListener("click", undo);
+$("redo").addEventListener("click", redo);
 $("clear-key").addEventListener("click", () => {
   const c = cur[editBank], k = keyOf(work, editBank, c); if (!k.strokes.length) return;
   if (!confirm(`${JAMO[c]} 자판의 ${BANKS[editBank].engine ? "문양" : "그림"}을 모두 지우겠는가?`)) return;
@@ -545,6 +540,7 @@ stage.addEventListener("pointerdown", (e) => {
   const st = { w: +ui.water.value, i: +ui.ink.value, s: +ui.size.value, d: ui.deplete.checked ? 1 : 0, seed: (Math.random() * 1e9) | 0, t0, pts: [] };
   const brush = Ink.makeBrush(st, sim);
   strokes.push(st);
+  delete redoStack[tkey(b, cur[b])];
   active = { st, brush, ts0: e.timeStamp, tsOff: now - e.timeStamp, id: e.pointerId, b, code: cur[b] };
   addPt(e);
 });
@@ -767,10 +763,10 @@ $("share-close").addEventListener("click", () => closeVeil($("share")));
 
 // ---------- 자판 ----------
 addEventListener("keydown", (e) => {
-  // 단청·자개 만들기: ⌘Z 되돌리기, ⇧⌘Z 다시 하기 (그 밖의 ⌘R 등 브라우저 단축키는 그대로)
-  if (mode === "make" && BANKS[editBank].engine && (e.metaKey || e.ctrlKey) && e.code === "KeyZ"
+  // 만들기: ⌘Z 되돌리기, ⇧⌘Z 다시 하기 (그 밖의 ⌘R 등 브라우저 단축키는 그대로)
+  if (mode === "make" && (e.metaKey || e.ctrlKey) && e.code === "KeyZ"
       && $("help").hidden && $("share").hidden && !(e.target.matches && e.target.matches("input, textarea"))){
-    e.preventDefault(); if (e.shiftKey) stampRedo(); else stampUndo(); return;
+    e.preventDefault(); if (e.shiftKey) redo(); else undo(); return;
   }
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   const veil = !$("help").hidden ? $("help") : !$("share").hidden ? $("share") : null;
