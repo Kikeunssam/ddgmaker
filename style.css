@@ -753,3 +753,47 @@ body { background: #efe7d6 url("assets/hanji_dak.jpg") center / cover fixed; }
 .card, .card dl, .card p { font-family: inherit; }
 .card dl { font-weight: 400; }
 .card dt { font-weight: 700; }
+
+/* ---------- 뱅크 (수묵 · 단청 · 자개 · 섞음) ---------- */
+
+#stage { cursor: crosshair; }
+#stage canvas { pointer-events: none; }
+#stage[data-tone="black"] #hint, #stage[data-tone="gray"] #hint { color: #fff3; }
+#stage.mix #inkc { filter: invert(1); }   /* 섞음: 수묵은 흰 먹으로 */
+#play #stage { cursor: none; }
+
+#bank-tabs { display: flex; gap: 4px; margin-left: 6px; }
+#maker #bank-tabs button { padding: 6px 14px; font-size: 16px; letter-spacing: 0.15em; }
+#bank-tabs em { font-style: normal; color: var(--red); margin-right: 6px; font-weight: 700; }
+#maker #bank-tabs button.on em { color: #f1a08f; }
+
+/* 단청 빛깔 */
+#maker .swatch { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px 5px 7px; }
+.swatch i { width: 16px; height: 16px; background: var(--sw); box-shadow: 0 0 0 1px #1d1a17, 0 0 0 3px #fbf8ef, 0 0 0 4px #1d1a17; margin: 0 4px; }
+
+/* 자판 모양도 뱅크의 종이 빛깔을 따른다 */
+#maker[data-bank="1"] .kt { background: #faf8f2; }
+#maker[data-bank="2"] .kt { background: #1a1918; border-color: #000; }
+#maker[data-bank="2"] .kt::after { border-color: rgba(255, 255, 255, 0.12); }
+#maker[data-bank="2"] .kt b { color: #e9e2d2; }
+#maker[data-bank="2"] .kt.drawn b { color: #f6efe4; }
+#maker[data-bank="2"] .kt span { background: rgba(26, 25, 24, 0.85); color: #cfc6b6; }
+
+/* 뱅크를 넘길 때 구석에 잠깐 보이는 이름 (1편과 같다) */
+#bank-label {
+  position: fixed;
+  right: calc(16px + env(safe-area-inset-right, 0px));
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  z-index: 3;
+  font-size: 15px;
+  letter-spacing: 0.3em;
+  color: rgba(128, 120, 110, 0.8);
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  pointer-events: none;
+}
+#bank-label.on { opacity: 1; transition: opacity 0.1s ease; }
+
+#play[data-tone="white"] { background: #e6e2d8; }
+#play[data-tone="black"] { background: #0b0b0a; }
+#play[data-tone="gray"] { background: #3c3b37; }

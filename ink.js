@@ -65,21 +65,29 @@ const paperRnd = mulberry32(20261027);
 })();
 
 // 보이는 종이를 캔버스에 그린다 (흡수도와 같은 결이라 먹이 보이는 섬유를 따라 번진다)
-function drawPaper(pc){
+// tone: 'ink' 누런 한지(수묵), 'white' 흰 한지(단청), 'black' 검은 한지(자개), 'gray' 회색(섞음)
+const TONES = {
+  ink:   { bg: '#efe6d2', n: 7,  hi: 'rgba(255,252,240,.55)', lo: 'rgba(130,110,80,.13)' },
+  white: { bg: '#f8f6f0', n: 5,  hi: 'rgba(255,255,255,.85)', lo: 'rgba(150,140,120,.10)' },
+  black: { bg: '#161514', n: 6,  hi: 'rgba(120,112,100,.16)', lo: 'rgba(0,0,0,.25)' },
+  gray:  { bg: '#5a5852', n: 6,  hi: 'rgba(150,145,135,.18)', lo: 'rgba(30,28,25,.16)' },   // 섞음
+};
+function drawPaper(pc, tone = 'ink'){
+  const T = TONES[tone] || TONES.ink;
   pc.width = LW; pc.height = LH;
-  const r = paperRnd;
+  const r = tone === 'ink' ? paperRnd : mulberry32(tone.length * 17 + 3);
   const g = pc.getContext('2d');
-  g.fillStyle = '#efe6d2'; g.fillRect(0, 0, LW, LH);
+  g.fillStyle = T.bg; g.fillRect(0, 0, LW, LH);
   const id = g.getImageData(0, 0, LW, LH), px = id.data;
   for (let y = 0; y < LH; y++) for (let x = 0; x < LW; x++){
     const i = (y*LW+x)*4, a = A[Math.min(GH-1,(y/SC)|0)*GW + Math.min(GW-1,(x/SC)|0)];
-    const n = (r()-0.5)*7 - (a-1)*7;
+    const n = (r()-0.5)*T.n - (a-1)*T.n;
     px[i] += n; px[i+1] += n; px[i+2] += n*0.9;
   }
   g.putImageData(id, 0, 0);
   g.lineCap = 'round';
   for (const f of fibers){
-    g.strokeStyle = r() < 0.6 ? 'rgba(255,252,240,.55)' : 'rgba(130,110,80,.13)';
+    g.strokeStyle = r() < 0.6 ? T.hi : T.lo;
     g.lineWidth = 0.6 + r()*0.8;
     g.beginPath(); g.moveTo(f[0][0], f[0][1]); for (const p of f) g.lineTo(p[0], p[1]); g.stroke();
   }
@@ -371,5 +379,5 @@ function bake(strokes, sim, dryMs = 1500){
   sim.render();
 }
 
-window.Ink = { LW, LH, SC, GW, GH, STEP_MS, drawPaper, makeSim, makeBrush, makeReplay, bake, strokesLength };
+window.Ink = { LW, LH, SC, GW, GH, STEP_MS, drawPaper, mulberry32, makeSim, makeBrush, makeReplay, bake, strokesLength };
 })();

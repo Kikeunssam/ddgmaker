@@ -13,8 +13,8 @@
 <body>
   <!-- 먹이 번지는 종이. 만들기 화면과 연주 화면이 이 종이 하나를 옮겨 가며 쓴다 -->
   <div id="stage">
-    <canvas id="paper"></canvas>
     <canvas id="inkc"></canvas>
+    <canvas id="vecc"></canvas>
     <div id="hint">여기에 붓으로 그려 보시게</div>
   </div>
 
@@ -44,6 +44,11 @@
   <div id="maker" hidden>
     <header class="bar">
       <h1>둥당기 만들기</h1>
+      <nav id="bank-tabs">
+        <button type="button" class="on"><em>一</em>수묵</button>
+        <button type="button"><em>二</em>단청</button>
+        <button type="button"><em>三</em>자개</button>
+      </nav>
       <input id="title" maxlength="30" placeholder="작품 이름을 지어 보시게나" autocomplete="off" spellcheck="false">
       <span class="spacer"></span>
       <button type="button" id="open-help" class="ghost">쓰는 법</button>
@@ -53,7 +58,7 @@
 
     <div class="work">
       <section class="paper-col">
-        <div class="tools">
+        <div class="tools" data-tools="0">
           <div class="presets" id="presets">
             <button type="button" data-w="35" data-i="100">농묵 · 진한 먹</button>
             <button type="button" data-w="65" data-i="28">담묵 · 옅은 먹</button>
@@ -64,6 +69,22 @@
           <label>먹 <input type="range" id="ink" min="5" max="100" value="80"><span class="val" id="inkV"></span></label>
           <label>굵기 <input type="range" id="size" min="6" max="160" value="40"><span class="val" id="sizeV"></span></label>
           <label><input type="checkbox" id="deplete" checked> 먹이 점점 줄어듦</label>
+        </div>
+        <div class="tools" data-tools="1" hidden>
+          <div class="presets" id="dc-colors"></div>
+          <div class="presets" id="dc-sym"></div>
+          <label>굵기 <input type="range" id="dc-size" min="4" max="60" value="16"><span class="val" id="dc-sizeV"></span></label>
+        </div>
+        <div class="tools" data-tools="2" hidden>
+          <div class="presets" id="jg-kind">
+            <button type="button" data-k="0">끊음질 · 자개 조각</button>
+            <button type="button" data-k="1">자개 알</button>
+          </div>
+          <div class="presets" id="jg-pal">
+            <button type="button" data-c="0">진주빛</button>
+            <button type="button" data-c="1">전복빛</button>
+          </div>
+          <label>크기 <input type="range" id="jg-size" min="8" max="60" value="24"><span class="val" id="jg-sizeV"></span></label>
         </div>
         <div id="stage-box"></div>
         <div class="under">
@@ -92,6 +113,7 @@
   <!-- 연주 화면 -->
   <div id="play" hidden>
     <button type="button" id="play-exit">나가기</button>
+    <div id="bank-label"></div>
   </div>
 
   <!-- 쓰는 법 -->
@@ -101,7 +123,8 @@
       <dl>
         <dt>만들기</dt><dd><span class="s">아래에서 자판을 하나 고르고,</span> <span class="s">오른쪽에서 소리를 고른 뒤,</span> <span class="s">종이에 붓으로 그려 보시게.</span> <span class="s">그린 그림은 그 자판에 바로 담긴다네.</span></dd>
         <dt>붓</dt><dd><span class="s">천천히 그으면 굵고, 빠르게 그으면 가늘다네.</span> <span class="s">물이 많으면 번지고, 적으면 붓결이 갈라진다네.</span> <span class="s">붓을 멈추고 누르고 있으면 먹이 고인다네.</span> <span class="s"><kbd>1</kbd> ~ <kbd>4</kbd> 붓 고르기.</span></dd>
-        <dt>연주하기</dt><dd><span class="s">자판을 누르면 소리와 함께 그림이 처음부터 다시 그려지고, 다 그려지면 스르르 사라진다네.</span> <span class="s">스마트기기는 화면을 두드리시게.</span> <span class="s"><kbd>Esc</kbd> 만들기로 돌아가기.</span></dd>
+        <dt>단청 · 자개</dt><dd><span class="s">단청 붓은 한 번 그으면 가운데를 두고 여러 방향으로 되풀이되어 단청 문양이 된다네.</span> <span class="s">자개 붓은 그은 자리에 자개 조각을 끊어 박는다네(끊음질).</span></dd>
+        <dt>연주하기</dt><dd><span class="s">자판을 누르면 소리와 함께 그림이 처음부터 다시 그려지고, 다 그려지면 스르르 사라진다네.</span> <span class="s">스마트기기는 화면을 두드리시게.</span> <span class="s"><kbd>Space</kbd> 뱅크 넘기기: <span class="nw">1 수묵</span> → <span class="nw">2 단청</span> → <span class="nw">3 자개</span> → <span class="nw">4 섞음.</span></span> <span class="s">섞음은 들어갈 때마다 새로 섞인다네.</span> <span class="s">스마트기기는 오른쪽 아래 칸.</span> <span class="s"><kbd>Esc</kbd> 만들기로 돌아가기.</span></dd>
         <dt>벗에게 나누기</dt><dd><span class="s">주소를 벗에게 보내면 벗도 그대의 작품을 연주하고,</span> <span class="s">고쳐서 제 작품으로 만들 수 있다네.</span></dd>
       </dl>
       <div class="close"><button type="button" id="help-close" class="btn"><span>닫기</span></button></div>
@@ -130,6 +153,7 @@
     if (location.protocol === "file:") document.write('<script src="sounds.js"><\/script>');
   </script>
   <script src="ink.js"></script>
+  <script src="patterns.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

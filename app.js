@@ -10,35 +10,55 @@ const MOBILE = window.matchMedia("(pointer: coarse)").matches;
 const MAX_REPLAYS = MOBILE ? 6 : 12;   // 연주 때 동시에 다시 그려지는 그림 수 (1편 동시 영상 상한과 같다)
 const VOICES_PER_KEY = 8;
 const KEEP_MS = 900;                   // 다 그려진 그림이 사라지기 시작할 때까지
-const FADE_K = 0.92;                   // 한 장면마다 남는 먹 (약 1초에 걸쳐 사라진다)
+const FADE_K = 0.92;                   // 수묵: 한 장면마다 남는 먹 (약 1초에 걸쳐 사라진다)
+const FADE_MS = 1000;                  // 단청·자개: 사라지는 데 걸리는 시간
 const RATE_MIN = 0.25, RATE_MAX = 8;   // 소리 길이에 맞출 때 빠르기 한도
-const STORE = "ddgmaker-work-v1", THUMBS = "ddgmaker-thumbs-v1";
+const STORE = "ddgmaker-work-v2", OLD_STORE = "ddgmaker-work-v1", THUMBS = "ddgmaker-thumbs-v2";
 const SOUND_BY_ID = new Map(SOUNDS.map((s, i) => [s.id, { ...s, index: i }]));
 const { LW, LH, STEP_MS } = Ink;
 
+// 뱅크: 만들기는 1~3, 연주할 때는 4 섞음이 더 붙는다 (스페이스바 / 오른쪽 아래 칸으로 넘긴다)
+const BANKS = [
+  { name: "수묵", kind: "ink", tone: "ink" },
+  { name: "단청", kind: "dc", tone: "white", engine: Patterns.dancheong },
+  { name: "자개", kind: "jg", tone: "black", engine: Patterns.jagae },
+];
+const MIX = { name: "섞음", kind: "mix", tone: "gray" };
+const NB = BANKS.length;
+
 // ---------- 작품 ----------
-// work = { title, keys: { g: { snd: "janggu_deong_strong", fit: true, strokes: [...] } } }
-// 획 하나 = { w, i, s, d, seed, t0, pts: [[x, y, t, p], ...] } (x·y는 0.5px 단위, t는 ms, p는 펜 압력 또는 -1)
-function emptyWork(){
+// work = { title, banks: [ { keys: { g: { snd, fit, strokes: [...] } } } × 3 ] }
+// 획 하나: 수묵 { w, i, s, d, seed, t0, pts }, 단청 { c, n, s, t0, pts }, 자개 { k, c, s, seed, t0, pts }
+// pts = [[x, y, t, p], ...] (x·y는 0.5px 단위, t는 ms, p는 펜 압력 또는 -1)
+function emptyBank(b){
   const keys = {};
   for (const c of GRID) keys[c] = { snd: null, fit: true, strokes: [] };
-  for (const s of SOUNDS) if (s.key && keys[s.key]) keys[s.key].snd = s.id;
-  return { title: "", keys };
+  for (const s of SOUNDS) if (s.bank === b && keys[s.key]) keys[s.key].snd = s.id;
+  return { keys };
 }
+function emptyWork(){ return { title: "", banks: BANKS.map((_, b) => emptyBank(b)) }; }
 function normalize(w){
   const out = emptyWork();
-  out.title = (w && typeof w.title === "string") ? w.title.slice(0, 30) : "";
-  for (const c of GRID){
-    const k = w && w.keys && w.keys[c];
-    if (!k) continue;
-    out.keys[c] = { snd: SOUND_BY_ID.has(k.snd) ? k.snd : null, fit: k.fit !== false, strokes: Array.isArray(k.strokes) ? k.strokes : [] };
-  }
+  if (!w) return out;
+  out.title = typeof w.title === "string" ? w.title.slice(0, 30) : "";
+  const banks = Array.isArray(w.banks) ? w.banks : w.keys ? [{ keys: w.keys }] : [];   // 예전 작품(뱅크 1개)은 수묵으로
+  banks.slice(0, NB).forEach((bk, b) => {
+    for (const c of GRID){
+      const k = bk && bk.keys && bk.keys[c];
+      if (!k) continue;
+      out.banks[b].keys[c] = { snd: SOUND_BY_ID.has(k.snd) ? k.snd : null, fit: k.fit !== false, strokes: Array.isArray(k.strokes) ? k.strokes : [] };
+    }
+  });
   return out;
 }
-const hasDrawing = (w) => GRID.some((c) => w.keys[c].strokes.length);
+const keyOf = (w, b, c) => w.banks[b].keys[c];
+const hasDrawing = (w) => w.banks.some((bk) => GRID.some((c) => bk.keys[c].strokes.length));
 
 let work, thumbs;
-try { work = normalize(JSON.parse(localStorage.getItem(STORE) || "null")); } catch (_) { work = emptyWork(); }
+try {
+  const raw = localStorage.getItem(STORE) || localStorage.getItem(OLD_STORE);
+  work = normalize(JSON.parse(raw || "null"));
+} catch (_) { work = emptyWork(); }
 try { thumbs = JSON.parse(localStorage.getItem(THUMBS) || "{}") || {}; } catch (_) { thumbs = {}; }
 let saveTimer = 0;
 function save(){
@@ -116,37 +136,65 @@ document.addEventListener("visibilitychange", () => {
   if (!document.hidden && audio.state !== "running"){ const p = audio.resume(); if (p && p.catch) p.catch(() => {}); }
 });
 
-// 소리는 모두 합쳐 3MB 남짓이라 처음에 다 받아 둔다 (소리 길이를 알아야 빠르기를 맞출 수 있다)
-Promise.all(SOUNDS.map((s) => ensureSound(s.id))).catch((err) => {
-  const hint = location.protocol === "file:" ? " (소리를 바꿨다면 python3 tools/make_sounds_js.py 를 한 번 실행하시게)" : "";
-  toast(`불러오지 못한 소리가 있네: ${err.message}${hint}`, 8);
-});
+// 소리는 처음에 다 받아 둔다 (소리 길이를 알아야 빠르기를 맞출 수 있다). 수묵 뱅크부터.
+[0, 1, 2].reduce((p, b) => p.then(() => Promise.all(SOUNDS.filter((s) => s.bank === b).map((s) => ensureSound(s.id)))), Promise.resolve())
+  .catch((err) => {
+    const hint = location.protocol === "file:" ? " (소리를 바꿨다면 python3 tools/make_sounds_js.py 를 한 번 실행하시게)" : "";
+    toast(`불러오지 못한 소리가 있네: ${err.message}${hint}`, 8);
+  });
 
-// ---------- 먹 종이 ----------
-const stage = $("stage"), ic = $("inkc"), hint = $("hint");
-Ink.drawPaper($("paper"));
+// ---------- 종이 ----------
+// 뱅크마다 바탕 종이가 다르다: 수묵 누런 한지, 단청 흰 한지, 자개 검은 한지, 섞음 회색.
+// 수묵은 먹이 번지는 격자(ic), 단청·자개는 그림 판(vc)에 그린다.
+const stage = $("stage"), ic = $("inkc"), vc = $("vecc"), hint = $("hint");
+const vctx = vc.getContext("2d");
+vc.width = LW; vc.height = LH;
+const papers = {};
+for (const t of ["ink", "white", "black", "gray"]){
+  const pc = document.createElement("canvas"); pc.className = "paper"; pc.dataset.tone = t;
+  Ink.drawPaper(pc, t); stage.insertBefore(pc, ic); papers[t] = pc;
+}
 const sim = Ink.makeSim(ic);
 const bakeSim = Ink.makeSim(document.createElement("canvas"));   // 미리보기 그림 굽기용 (화면에 안 보임)
 
-// 다시 그리기: 시뮬레이션 시계에 맞춰 붓에 획을 넣는다. rate > 1 이면 빠르게.
-let replays = [];   // { rp, start, rate, key }
-function addReplay(strokes, rate, keep, key){
-  if (!strokes.length) return null;
-  const rp = Ink.makeReplay(strokes, sim, keep);
-  const r = { rp, start: sim.clock, rate, key };
-  replays.push(r);
+function showBankOnStage(bank){   // bank: BANKS[b] 또는 MIX
+  for (const t in papers) papers[t].hidden = t !== bank.tone;
+  ic.hidden = !(bank.kind === "ink" || bank.kind === "mix");
+  vc.hidden = bank.kind === "ink";
+  stage.classList.toggle("mix", bank.kind === "mix");   // 섞음: 수묵 먹을 흰 먹으로
+  stage.dataset.tone = bank.tone; $("play").dataset.tone = bank.tone;
+}
+
+// ---------- 다시 그리기 ----------
+// 수묵: 시뮬레이션 시계에 맞춰 붓에 획을 넣는다. 단청·자개: 그림 판(layer)마다 따로 그린다.
+// rate > 1 이면 빠르게.
+let replays = [];    // 수묵 { rp, start, rate }
+let vreplays = [];   // 단청·자개 { rp, L, engine, start, rate, keep, done }
+function addReplay(strokes, rate, keep){
+  if (!strokes.length) return;
+  replays.push({ rp: Ink.makeReplay(strokes, sim, keep), start: sim.clock, rate });
   while (replays.length > MAX_REPLAYS) replays.shift();
+}
+function addVReplay(engine, strokes, rate, keep, L){
+  if (!strokes.length) return null;
+  L = L || engine.newLayer();
+  const r = { rp: Patterns.makeReplay(engine, strokes, L), L, engine, start: sim.clock, rate, keep, done: false };
+  vreplays.push(r);
+  while (vreplays.length > MAX_REPLAYS) vreplays.shift();
   return r;
 }
 function tickReplays(){
-  if (!replays.length) return;
-  replays = replays.filter((r) => !r.rp.to((sim.clock - r.start) * r.rate));
+  if (replays.length) replays = replays.filter((r) => !r.rp.to((sim.clock - r.start) * r.rate));
+  for (const r of vreplays) if (!r.done) r.done = r.rp.to((sim.clock - r.start) * r.rate);
+  if (mode === "make" && vreplays.length) vreplays = vreplays.filter((r) => !r.done);   // 만들기 화면은 그림 판에 남아 있으니 목록에서 뺀다
 }
 // 남은 붓질을 한꺼번에 끝낸다 (만들기 화면에서 다시 그리는 중에 붓을 대면)
 function finishReplays(){
   let guard = 0;
   while (replays.length && guard++ < 20000){ tickReplays(); sim.step(); }
   replays = [];
+  for (const r of vreplays) if (!r.done) r.done = r.rp.to(Infinity);
+  vreplays = vreplays.filter((r) => r.keep);   // 만들기 화면의 다시 그리기는 끝낸 뒤 목록에서 뺀다
 }
 
 function rateFor(k){
@@ -174,42 +222,90 @@ function frame(now){
   if (n === 4) acc = 0;
   if (mode === "play") sim.fade(FADE_K);
   sim.render();
+  drawVec(now);
   if (mode === "make") bakeNextThumb();
   requestAnimationFrame(frame);
 }
-requestAnimationFrame(frame);
+
+// 단청·자개 그림 판을 화면에 옮긴다
+function drawVec(now){
+  if (vc.hidden) return;
+  vctx.setTransform(1, 0, 0, 1, 0, 0);
+  vctx.clearRect(0, 0, LW, LH);
+  if (mode === "make"){
+    if (editLayer && BANKS[editBank].engine) BANKS[editBank].engine.draw(vctx, editLayer, now);
+    return;
+  }
+  vreplays = vreplays.filter((r) => {
+    const a = r.done && sim.clock > r.keep ? 1 - (sim.clock - r.keep) / FADE_MS : 1;
+    if (a <= 0) return false;
+    vctx.globalAlpha = a;
+    r.engine.draw(vctx, r.L, now);
+    return true;
+  });
+  vctx.globalAlpha = 1;
+}
 
 // ---------- 미리보기 그림 ----------
 const thumbCanvas = document.createElement("canvas");
 thumbCanvas.width = 240; thumbCanvas.height = 150;
-function thumbOf(canvas){
-  const g = thumbCanvas.getContext("2d");
-  g.clearRect(0, 0, 240, 150);
-  g.drawImage(canvas, 0, 0, 240, 150);
+const tctx = thumbCanvas.getContext("2d");
+const tkey = (b, c) => b + c;
+function thumbOfCanvas(canvas){
+  tctx.setTransform(1, 0, 0, 1, 0, 0);
+  tctx.clearRect(0, 0, 240, 150);
+  tctx.drawImage(canvas, 0, 0, 240, 150);
   return thumbCanvas.toDataURL("image/png");
 }
+function thumbOfLayer(engine, L){
+  tctx.setTransform(1, 0, 0, 1, 0, 0);
+  tctx.clearRect(0, 0, 240, 150);
+  tctx.setTransform(240 / LW, 0, 0, 150 / LH, 0, 0);
+  // 자개는 화면에서처럼 그리되 setTransform을 쓰므로 축소한 판에 따로 그린 뒤 옮긴다
+  if (engine.kind === "jg"){
+    const big = thumbOfLayer.big || (thumbOfLayer.big = Object.assign(document.createElement("canvas"), { width: LW, height: LH }));
+    const g = big.getContext("2d"); g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, LW, LH);
+    engine.draw(g, L, 1200);
+    tctx.drawImage(big, 0, 0);
+  } else engine.draw(tctx, L, 0);
+  tctx.setTransform(1, 0, 0, 1, 0, 0);
+  return thumbCanvas.toDataURL("image/png");
+}
+function bakeThumb(b, strokes){
+  const bank = BANKS[b];
+  if (bank.kind === "ink"){ Ink.bake(strokes, bakeSim); return thumbOfCanvas(bakeSim.canvas); }
+  const L = bank.engine.newLayer();
+  Patterns.makeReplay(bank.engine, strokes, L).to(Infinity);
+  return thumbOfLayer(bank.engine, L);
+}
 let thumbTimer = 0;
-function scheduleThumb(code){
+function scheduleThumb(b, code){
   clearTimeout(thumbTimer);
   thumbTimer = setTimeout(() => {
-    if (mode !== "make" || cur !== code) return;
-    if (active || replays.length) return scheduleThumb(code);   // 그리는 중이거나 다시 그리는 중이면 조금 뒤에
-    sim.render(); setThumb(code, thumbOf(ic));
-  }, 1200);
+    if (mode !== "make" || editBank !== b || cur[b] !== code) return;
+    if (active || replays.length || vreplays.length) return scheduleThumb(b, code);   // 그리는 중이면 조금 뒤에
+    if (BANKS[b].kind === "ink"){ sim.render(); setThumb(b, code, thumbOfCanvas(ic)); }
+    else setThumb(b, code, thumbOfLayer(BANKS[b].engine, editLayer));
+  }, BANKS[b].kind === "ink" ? 1200 : 200);
 }
-function setThumb(code, url){
-  if (url) thumbs[code] = url; else delete thumbs[code];
-  save(); drawTile(code);
+function setThumb(b, code, url){
+  if (url) thumbs[tkey(b, code)] = url; else delete thumbs[tkey(b, code)];
+  save(); if (b === editBank) drawTile(code);
 }
-// 미리보기가 없는 키(링크로 받은 작품 등)는 쉬는 장면마다 하나씩 굽는다
+// 미리보기가 없는 자판(링크로 받은 작품 등)은 쉬는 장면마다 하나씩 굽는다
 function bakeNextThumb(){
-  const code = GRID.find((c) => work.keys[c].strokes.length && !thumbs[c] && c !== cur);
-  if (!code) return;
-  Ink.bake(work.keys[code].strokes, bakeSim);
-  setThumb(code, thumbOf(bakeSim.canvas));
+  for (let b = 0; b < NB; b++){
+    const code = GRID.find((c) => keyOf(work, b, c).strokes.length && !thumbs[tkey(b, c)] && !(b === editBank && c === cur[b]));
+    if (code){ setThumb(b, code, bakeThumb(b, keyOf(work, b, code).strokes)); return; }
+  }
 }
 
 // ---------- 만들기 화면 ----------
+let editBank = 0;
+const cur = ["g", "g", "g"];
+let editLayer = null;   // 단청·자개: 지금 자판의 그림 판
+
+// 붓 설정: 수묵
 const ui = { water: $("water"), ink: $("ink"), size: $("size"), deplete: $("deplete") };
 const presetBtns = [...$("presets").children];
 function showVals(){
@@ -221,7 +317,59 @@ function applyPreset(b){ ui.water.value = b.dataset.w; ui.ink.value = b.dataset.
 presetBtns.forEach((b) => b.addEventListener("click", () => applyPreset(b)));
 showVals();
 
-let cur = "g";
+// 붓 설정: 단청 (빛깔, 대칭, 굵기)
+const dc = { c: 0, n: 8 };
+(function buildDcTools(){
+  const cbox = $("dc-colors");
+  Patterns.DC_COLORS.forEach((col, i) => {
+    const b = document.createElement("button"); b.type = "button"; b.className = "swatch"; b.title = col.name;
+    b.style.setProperty("--sw", col.c); b.innerHTML = `<i></i>${col.name}`;
+    b.addEventListener("click", () => { dc.c = i; drawDcTools(); });
+    cbox.appendChild(b);
+  });
+  const sbox = $("dc-sym");
+  Patterns.DC_SYM.forEach((n) => {
+    const b = document.createElement("button"); b.type = "button"; b.dataset.n = n;
+    b.textContent = n === 1 ? "대칭 없음" : `${n}방향`;
+    b.addEventListener("click", () => { dc.n = n; drawDcTools(); });
+    sbox.appendChild(b);
+  });
+})();
+function drawDcTools(){
+  [...$("dc-colors").children].forEach((b, i) => b.classList.toggle("on", i === dc.c));
+  [...$("dc-sym").children].forEach((b) => b.classList.toggle("on", +b.dataset.n === dc.n));
+  $("dc-sizeV").textContent = $("dc-size").value;
+}
+$("dc-size").addEventListener("input", drawDcTools);
+drawDcTools();
+
+// 붓 설정: 자개 (조각/알, 빛깔, 크기)
+const jg = { k: 0, c: 0 };
+for (const b of $("jg-kind").children) b.addEventListener("click", () => { jg.k = +b.dataset.k; drawJgTools(); });
+for (const b of $("jg-pal").children) b.addEventListener("click", () => { jg.c = +b.dataset.c; drawJgTools(); });
+function drawJgTools(){
+  for (const b of $("jg-kind").children) b.classList.toggle("on", +b.dataset.k === jg.k);
+  for (const b of $("jg-pal").children) b.classList.toggle("on", +b.dataset.c === jg.c);
+  $("jg-sizeV").textContent = $("jg-size").value;
+}
+$("jg-size").addEventListener("input", drawJgTools);
+drawJgTools();
+
+// 뱅크 고르기
+const bankTabs = [...$("bank-tabs").children];
+bankTabs.forEach((t, b) => t.addEventListener("click", () => selectBank(b)));
+function selectBank(b){
+  if (active) endStroke({ pointerId: active.id });
+  finishReplays(); vreplays = [];
+  editBank = b; lastEndReal = 0;
+  bankTabs.forEach((t, i) => t.classList.toggle("on", i === b));
+  for (const el of document.querySelectorAll("[data-tools]")) el.hidden = +el.dataset.tools !== b;
+  $("maker").dataset.bank = b;
+  showBankOnStage(BANKS[b]);
+  buildSoundPick();
+  showKeyDrawing(cur[b]); drawTiles(); drawSide();
+}
+
 const tiles = {};
 (function buildKeyboard(){
   const box = $("keyboard");
@@ -237,21 +385,23 @@ const tiles = {};
   });
 })();
 function drawTile(c){
-  const el = tiles[c], k = work.keys[c], img = el.querySelector("img");
-  const t = k.strokes.length && thumbs[c];
+  const el = tiles[c], k = keyOf(work, editBank, c), img = el.querySelector("img");
+  const t = k.strokes.length && thumbs[tkey(editBank, c)];
   img.hidden = !t; if (t) img.src = t;
   el.classList.toggle("drawn", !!k.strokes.length);
   el.querySelector("span").textContent = k.snd ? SOUND_BY_ID.get(k.snd).name : "";
-  el.classList.toggle("sel", c === cur);
+  el.classList.toggle("sel", c === cur[editBank]);
 }
 const drawTiles = () => GRID.forEach(drawTile);
 
-(function buildSoundPick(){
-  const box = $("sound-pick");
-  for (const g of SOUND_GROUPS){
+function buildSoundPick(){
+  const box = $("sound-pick"); box.innerHTML = "";
+  for (const g of SOUND_GROUPS[editBank]){
     const d = document.createElement("div"); d.className = "grp";
     d.innerHTML = `<span>${g}</span><div class="chips"></div>`;
-    for (const s of SOUNDS.filter((s) => s.group === g)){
+    const list = SOUNDS.filter((s) => s.bank === editBank && s.group === g)
+      .sort((a, b) => a.name.localeCompare(b.name, "ko", { numeric: true }));
+    for (const s of list){
       const b = document.createElement("button"); b.type = "button"; b.textContent = s.name; b.dataset.id = s.id;
       b.addEventListener("click", () => chooseSound(s.id));
       d.lastChild.appendChild(b);
@@ -262,22 +412,20 @@ const drawTiles = () => GRID.forEach(drawTile);
   d.innerHTML = `<div class="chips"><button type="button" data-id="">소리 없음</button></div>`;
   d.querySelector("button").addEventListener("click", () => chooseSound(null));
   box.appendChild(d);
-})();
+}
 function drawSide(){
-  const k = work.keys[cur];
-  $("cur-key").textContent = JAMO[cur];
+  const c = cur[editBank], k = keyOf(work, editBank, c);
+  $("cur-key").textContent = JAMO[c];
   const s = k.snd && SOUND_BY_ID.get(k.snd);
   $("cur-sound").textContent = s ? `${s.group} ${s.name}` : "소리 없음";
-  for (const b of $("sound-pick").querySelectorAll("button")){
-    b.classList.toggle("on", (b.dataset.id || null) === k.snd);
-  }
+  for (const b of $("sound-pick").querySelectorAll("button")) b.classList.toggle("on", (b.dataset.id || null) === k.snd);
   $("fit").checked = k.fit;
   refreshFit();
   $("undo").disabled = $("clear-key").disabled = $("replay").disabled = !k.strokes.length;
 }
 function refreshFit(){
   if (mode !== "make") return;
-  const k = work.keys[cur];
+  const k = keyOf(work, editBank, cur[editBank]);
   const len = Ink.strokesLength(k.strokes) / 1000, sec = soundSec(k.snd);
   $("dur").textContent = k.strokes.length ? `그림 ${len.toFixed(1)}초` : "";
   let info = "";
@@ -292,63 +440,71 @@ function refreshFit(){
   }
   $("fit-info").textContent = info;
 }
-$("fit").addEventListener("change", () => { work.keys[cur].fit = $("fit").checked; save(); refreshFit(); });
+$("fit").addEventListener("change", () => { keyOf(work, editBank, cur[editBank]).fit = $("fit").checked; save(); refreshFit(); });
 
 function chooseSound(id){
-  work.keys[cur].snd = id; save();
-  drawSide(); drawTile(cur);
-  if (id) ensureSound(id).then(() => playSound(id, cur));
+  const c = cur[editBank];
+  keyOf(work, editBank, c).snd = id; save();
+  drawSide(); drawTile(c);
+  if (id) ensureSound(id).then(() => playSound(id, editBank + c));
 }
 
 function showKeyDrawing(code){
-  replays = []; sim.fading = false;
-  const st = work.keys[code].strokes;
-  if (st.length) Ink.bake(st, sim, 300); else sim.clear();
+  replays = []; vreplays = []; sim.fading = false;
+  const st = keyOf(work, editBank, code).strokes, bank = BANKS[editBank];
+  if (bank.kind === "ink"){
+    editLayer = null;
+    if (st.length) Ink.bake(st, sim, 300); else sim.clear();
+  } else {
+    editLayer = bank.engine.newLayer();
+    Patterns.makeReplay(bank.engine, st, editLayer).to(Infinity);
+  }
   hint.style.opacity = st.length ? 0 : 1;
 }
 function selectKey(code){
-  if (code === cur && mode === "make") return;
+  if (code === cur[editBank] && mode === "make") return;
   if (active) endStroke({ pointerId: active.id });
-  cur = code; lastEndReal = 0;
+  cur[editBank] = code; lastEndReal = 0;
   showKeyDrawing(code);
   drawTiles(); drawSide();
 }
-// 키 들어 보기: 소리와 함께 그림을 처음부터 다시 그린다 (연주 때와 같은 빠르기)
+// 자판 들어 보기: 소리와 함께 그림을 처음부터 다시 그린다 (연주 때와 같은 빠르기)
 function preview(code){
-  const k = work.keys[code];
-  if (k.snd) playSound(k.snd, code);
+  const k = keyOf(work, editBank, code), bank = BANKS[editBank];
+  if (k.snd) playSound(k.snd, editBank + code);
   if (!k.strokes.length) return;
-  replays = []; sim.fading = false; sim.clear(); hint.style.opacity = 0;
-  addReplay(k.strokes, rateFor(k), 0, code);
+  replays = []; vreplays = []; hint.style.opacity = 0;
+  if (bank.kind === "ink"){ sim.fading = false; sim.clear(); addReplay(k.strokes, rateFor(k), 0); }
+  else { bank.engine.clear(editLayer); addVReplay(bank.engine, k.strokes, rateFor(k), 0, editLayer); }
   tiles[code].classList.add("flash"); setTimeout(() => tiles[code].classList.remove("flash"), 300);
 }
 
-$("replay").addEventListener("click", () => preview(cur));
+$("replay").addEventListener("click", () => preview(cur[editBank]));
 $("undo").addEventListener("click", () => {
-  const k = work.keys[cur]; if (!k.strokes.length) return;
-  k.strokes.pop(); save(); showKeyDrawing(cur);
-  setThumb(cur, k.strokes.length ? thumbOf(ic) : null); drawSide();
+  const c = cur[editBank], k = keyOf(work, editBank, c); if (!k.strokes.length) return;
+  k.strokes.pop(); save(); showKeyDrawing(c);
+  setThumb(editBank, c, k.strokes.length ? bakeThumb(editBank, k.strokes) : null); drawSide();
 });
 $("clear-key").addEventListener("click", () => {
-  const k = work.keys[cur]; if (!k.strokes.length) return;
-  if (!confirm(`${JAMO[cur]} 자판의 그림을 모두 지우겠는가?`)) return;
-  k.strokes = []; save(); showKeyDrawing(cur); setThumb(cur, null); drawSide();
+  const c = cur[editBank], k = keyOf(work, editBank, c); if (!k.strokes.length) return;
+  if (!confirm(`${JAMO[c]} 자판의 그림을 모두 지우겠는가?`)) return;
+  k.strokes = []; save(); showKeyDrawing(c); setThumb(editBank, c, null); drawSide();
 });
 $("title").addEventListener("input", () => { work.title = $("title").value.slice(0, 30); save(); });
 
 // ---------- 붓으로 그리기 (시제품과 같은 기록 방식, 좌표는 0.5px 단위로 맞춰 링크에 그대로 담기게) ----------
 let active = null, lastEndReal = 0;
 function stagePoint(ev){
-  const r = ic.getBoundingClientRect();
+  const r = stage.getBoundingClientRect();
   return { x: (ev.clientX - r.left) / r.width * LW, y: (ev.clientY - r.top) / r.height * LH };
 }
-ic.addEventListener("pointerdown", (e) => {
+stage.addEventListener("pointerdown", (e) => {
   if (mode !== "make" || active) return;
   e.preventDefault();
-  if (replays.length) finishReplays();
-  try { ic.setPointerCapture(e.pointerId); } catch (_){}
+  if (replays.length || vreplays.length) finishReplays();
+  try { stage.setPointerCapture(e.pointerId); } catch (_){}
   hint.style.opacity = 0;
-  const strokes = work.keys[cur].strokes;
+  const b = editBank, bank = BANKS[b], strokes = keyOf(work, b, cur[b]).strokes;
   const now = performance.now();
   let t0 = 0;
   if (strokes.length){
@@ -356,10 +512,20 @@ ic.addEventListener("pointerdown", (e) => {
     const prevEnd = prev.t0 + (prev.pts.length ? prev.pts[prev.pts.length - 1][2] : 0);
     t0 = prevEnd + Math.min(450, lastEndReal ? now - lastEndReal : 450);   // 쉬는 시간은 짧게 줄여서 저장
   }
-  const st = { w: +ui.water.value, i: +ui.ink.value, s: +ui.size.value, d: ui.deplete.checked ? 1 : 0,
-               seed: (Math.random() * 1e9) | 0, t0: Math.round(t0), pts: [] };
+  t0 = Math.round(t0);
+  const seed = (Math.random() * 1e9) | 0;
+  let st, brush;
+  if (bank.kind === "ink"){
+    st = { w: +ui.water.value, i: +ui.ink.value, s: +ui.size.value, d: ui.deplete.checked ? 1 : 0, seed, t0, pts: [] };
+    brush = Ink.makeBrush(st, sim);
+  } else if (bank.kind === "dc"){
+    st = { c: dc.c, n: dc.n, s: +$("dc-size").value, t0, pts: [] };
+  } else {
+    st = { k: jg.k, c: jg.c, s: +$("jg-size").value, seed, t0, pts: [] };
+  }
+  if (!brush){ bank.engine.begin(editLayer, st); brush = { add: (pt) => bank.engine.add(editLayer, pt) }; }
   strokes.push(st);
-  active = { st, brush: Ink.makeBrush(st, sim), ts0: e.timeStamp, tsOff: now - e.timeStamp, id: e.pointerId, code: cur };
+  active = { st, brush, ts0: e.timeStamp, tsOff: now - e.timeStamp, id: e.pointerId, b, code: cur[b] };
   addPt(e);
 });
 function addPt(ev){
@@ -371,40 +537,78 @@ function addPt(ev){
   active.brush.add(pt);
   active.lastMove = performance.now(); active.lastEv = ev;
 }
-ic.addEventListener("pointermove", (e) => {
+stage.addEventListener("pointermove", (e) => {
   if (!active || e.pointerId !== active.id) return;
   const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
   for (const ev of (evs.length ? evs : [e])) addPt(ev);
 });
 function endStroke(e){
   if (!active || e.pointerId !== active.id) return;
-  const code = active.code;
+  const { b, code } = active;
+  if (BANKS[b].engine && editLayer) BANKS[b].engine.end(editLayer);
   active = null; lastEndReal = performance.now();
-  save(); drawSide(); drawTile(code); scheduleThumb(code);
+  save(); drawSide(); drawTile(code); scheduleThumb(b, code);
 }
-ic.addEventListener("pointerup", endStroke);
-ic.addEventListener("pointercancel", endStroke);
+stage.addEventListener("pointerup", endStroke);
+stage.addEventListener("pointercancel", endStroke);
 
 // ---------- 연주 ----------
-let playFrom = "make";
+let playFrom = "make", playBank = 0, mixMap = null;
 function enterPlay(w, from){
   playing = w; playFrom = from;
   if (active) endStroke({ pointerId: active.id });
   mode = "play";
   $("maker").hidden = true; $("play").hidden = false;
   $("play").appendChild(stage);
-  replays = []; sim.clear(); sim.fading = true; hint.style.opacity = 0;
-  for (const c of GRID) ensureSound(playing.keys[c].snd).catch(() => {});
+  hint.style.opacity = 0;
+  setPlayBank(0, false);
+  for (const bk of playing.banks) for (const c of GRID) ensureSound(bk.keys[c].snd).catch(() => {});
 }
+// 섞음: 들어올 때마다 뱅크 1·2·3에서 9·9·8개(8개 뱅크는 무작위)를 겹치지 않게 골라 26자판에 섞어 놓는다.
+// 그림이 있는 자판을 먼저 고르고, 모자라면 소리만 있는 자판으로 채운다.
+function shuffle(a){ for (let i = a.length - 1; i > 0; i--){ const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+function makeMix(w){
+  const pools = BANKS.map((_, b) => {
+    const drawn = shuffle(GRID.filter((c) => keyOf(w, b, c).strokes.length));
+    const soundOnly = shuffle(GRID.filter((c) => !keyOf(w, b, c).strokes.length && keyOf(w, b, c).snd));
+    return drawn.concat(soundOnly).map((c) => ({ b, c }));
+  });
+  const counts = [9, 9, 9]; counts[Math.floor(Math.random() * 3)] = 8;
+  let picked = [];
+  pools.forEach((p, b) => picked.push(...p.splice(0, counts[b])));
+  const rest = shuffle(pools.flat());
+  while (picked.length < GRID.length && rest.length) picked.push(rest.pop());
+  picked = shuffle(picked);
+  const map = {};
+  GRID.forEach((key, i) => { if (picked[i]) map[key] = picked[i]; });
+  return map;
+}
+let labelT = 0;
+function setPlayBank(b, label = true){
+  playBank = b;
+  replays = []; vreplays = []; sim.clear(); sim.fading = true;
+  const bank = b < NB ? BANKS[b] : MIX;
+  if (bank.kind === "mix") mixMap = makeMix(playing);
+  showBankOnStage(bank);
+  if (label){
+    const el = $("bank-label"); el.textContent = bank.name; el.classList.add("on");
+    clearTimeout(labelT); labelT = setTimeout(() => el.classList.remove("on"), 600);
+  }
+}
+const nextBank = () => setPlayBank((playBank + 1) % (NB + 1));
 function trigger(code){
-  const k = playing && playing.keys[code];
-  if (!k) return false;
-  if (k.snd) playSound(k.snd, code);
+  if (!playing) return false;
+  let b = playBank, c = code;
+  if (playBank === NB){ const m = mixMap && mixMap[code]; if (!m) return false; b = m.b; c = m.c; }
+  const k = keyOf(playing, b, c);
+  if (k.snd) playSound(k.snd, b + c);
   if (k.strokes.length){
     const rate = rateFor(k);
     const keep = sim.clock + Ink.strokesLength(k.strokes) / rate + KEEP_MS;
-    if (keep > sim.keepUntil) sim.keepUntil = keep;
-    addReplay(k.strokes, rate, keep, code);
+    if (BANKS[b].kind === "ink"){
+      if (keep > sim.keepUntil) sim.keepUntil = keep;
+      addReplay(k.strokes, rate, keep);
+    } else addVReplay(BANKS[b].engine, k.strokes, rate, keep);
   }
   return !!(k.snd || k.strokes.length);
 }
@@ -416,12 +620,12 @@ function exitPlay(){
 $("play-exit").addEventListener("click", exitPlay);
 $("play-exit").addEventListener("pointerdown", (e) => e.stopPropagation());
 
-// 화면 전체를 보이지 않는 칸으로 나눈다: 가로 화면 9x3, 세로 화면 3x9 (27번째 칸은 비워 둔다)
+// 화면 전체를 보이지 않는 칸으로 나눈다: 가로 화면 9x3, 세로 화면 3x9. 27번째(오른쪽 아래) 칸은 뱅크 넘기기.
 function cellAt(x, y){
   const w = innerWidth, h = innerHeight, cols = w >= h ? 9 : 3, rows = 27 / cols;
   const c = Math.min(cols - 1, Math.max(0, Math.floor(x / w * cols)));
   const r = Math.min(rows - 1, Math.max(0, Math.floor(y / h * rows)));
-  return GRID[r * cols + c];
+  return GRID[r * cols + c] || "switch";
 }
 function ripple(x, y){
   const d = document.createElement("div"); d.className = "ripple";
@@ -431,9 +635,10 @@ function ripple(x, y){
 $("play").addEventListener("pointerdown", (e) => {
   e.preventDefault();
   unlockAudio();
-  if (e.pointerType === "mouse") return;   // 마우스 클릭은 소리만 켜고 연주는 키보드로
+  if (e.pointerType === "mouse") return;   // 마우스 클릭은 소리만 켜고 연주는 자판으로
   const cell = cellAt(e.clientX, e.clientY);
-  if (cell && trigger(cell)) ripple(e.clientX, e.clientY);
+  if (cell === "switch"){ nextBank(); return; }
+  if (trigger(cell)) ripple(e.clientX, e.clientY);
 }, { passive: false });
 
 // ---------- 화면 바꾸기 ----------
@@ -442,7 +647,7 @@ function enterMake(){
   $("play").hidden = true; $("maker").hidden = false;
   $("stage-box").appendChild(stage);
   $("title").value = work.title;
-  showKeyDrawing(cur); drawTiles(); drawSide();
+  selectBank(editBank);
 }
 
 const startEl = $("start");
@@ -517,7 +722,7 @@ $("share-copy").addEventListener("click", async () => {
 });
 $("share-close").addEventListener("click", () => closeVeil($("share")));
 
-// ---------- 키보드 ----------
+// ---------- 자판 ----------
 addEventListener("keydown", (e) => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;   // ⌘R 등 브라우저 단축키는 그대로
   const veil = !$("help").hidden ? $("help") : !$("share").hidden ? $("share") : null;
@@ -529,7 +734,7 @@ addEventListener("keydown", (e) => {
     if (e.key === "Enter" || e.key === "Escape") e.target.blur();
     return;
   }
-  // 한글 입력 상태에서도 키 자리(e.code) 기준
+  // 한글 입력 상태에서도 자판 자리(e.code) 기준
   const code = e.code.startsWith("Key") ? e.code.slice(3).toLowerCase() : "";
   if (mode === "start"){
     if (startPhase !== "start" || e.key === "Tab") return;
@@ -541,13 +746,14 @@ addEventListener("keydown", (e) => {
   if (mode === "play"){
     if (e.key === "Escape"){ exitPlay(); return; }
     if (e.repeat || e.shiftKey) return;
+    if (e.code === "Space"){ e.preventDefault(); nextBank(); return; }
     if (GRID.includes(code)){ e.preventDefault(); trigger(code); }
     return;
   }
   // 만들기
   if (e.target.closest && e.target.closest("button") && (e.key === "Enter" || e.code === "Space")) return;
   const n = ["Digit1", "Digit2", "Digit3", "Digit4"].indexOf(e.code);
-  if (n >= 0){ applyPreset(presetBtns[n]); return; }
+  if (n >= 0 && editBank === 0){ applyPreset(presetBtns[n]); return; }
   if (GRID.includes(code)){
     e.preventDefault();
     if (e.repeat) return;
@@ -555,11 +761,12 @@ addEventListener("keydown", (e) => {
   }
 });
 
-addEventListener("contextmenu", (e) => { if (mode === "play" || e.target === ic) e.preventDefault(); });
+addEventListener("contextmenu", (e) => { if (mode === "play" || stage.contains(e.target)) e.preventDefault(); });
 document.addEventListener("gesturestart", (e) => e.preventDefault());
 
 // ---------- 링크에 작품 담기 ----------
 // 획 기록을 바이트로 줄여(변화량만, 가변 길이 정수) 압축한 뒤 주소 # 뒤에 붙인다. 서버가 필요 없다.
+// 형식 1: 뱅크 1개(수묵)  형식 2: 뱅크 3개(수묵·단청·자개)
 function bytesWriter(){
   const a = [];
   const u = (n) => { n = Math.max(0, Math.round(n)); while (n >= 128){ a.push((n & 127) | 128); n = Math.floor(n / 128); } a.push(n); };
@@ -570,26 +777,37 @@ function bytesReader(buf){
   const u = () => { let n = 0, m = 1, b; do { if (i >= buf.length) throw new Error("짧은 데이터"); b = buf[i++]; n += (b & 127) * m; m *= 128; } while (b & 128); return n; };
   return { u, z: () => { const n = u(); return n % 2 ? -(n + 1) / 2 : n / 2; }, b: () => { if (i >= buf.length) throw new Error("짧은 데이터"); return buf[i++]; } };
 }
+// 뱅크마다 다른 붓 설정
+const STROKE_HEAD = [
+  { w: (o, st) => { o.b(st.w); o.b(st.i); o.u(st.s); o.b(st.d); o.u(st.seed >>> 0); },
+    r: (r) => ({ w: r.b(), i: r.b(), s: r.u(), d: r.b(), seed: r.u() | 0 }) },
+  { w: (o, st) => { o.b(st.c); o.b(st.n); o.u(st.s); },
+    r: (r) => ({ c: r.b(), n: r.b(), s: r.u() }) },
+  { w: (o, st) => { o.b(st.k); o.b(st.c); o.u(st.s); o.u(st.seed >>> 0); },
+    r: (r) => ({ k: r.b(), c: r.b(), s: r.u(), seed: r.u() | 0 }) },
+];
 function packWork(w){
   const o = bytesWriter();
-  o.b(1);   // 형식 번호
+  o.b(2);   // 형식 번호
   const title = new TextEncoder().encode(w.title || "");
   o.u(title.length); for (const x of title) o.b(x);
-  for (const c of GRID){
-    const k = w.keys[c];
-    o.u(k.snd ? SOUND_BY_ID.get(k.snd).index + 1 : 0);
-    o.b(k.fit ? 1 : 0);
-    o.u(k.strokes.length);
-    for (const st of k.strokes){
-      o.b(st.w); o.b(st.i); o.u(st.s); o.b(st.d);
-      o.u(st.seed >>> 0); o.u(st.t0);
-      const pen = st.pts.some((p) => p[3] >= 0);
-      o.b(pen ? 1 : 0); o.u(st.pts.length);
-      let px = 0, py = 0, pt = 0;
-      for (const p of st.pts){
-        o.z(p[0] * 2 - px); o.z(p[1] * 2 - py); o.z(p[2] - pt);
-        px = Math.round(p[0] * 2); py = Math.round(p[1] * 2); pt = p[2];
-        if (pen) o.b(p[3] >= 0 ? Math.round(p[3] * 100) : 255);
+  for (let b = 0; b < NB; b++){
+    for (const c of GRID){
+      const k = keyOf(w, b, c);
+      o.u(k.snd ? SOUND_BY_ID.get(k.snd).index + 1 : 0);
+      o.b(k.fit ? 1 : 0);
+      o.u(k.strokes.length);
+      for (const st of k.strokes){
+        STROKE_HEAD[b].w(o, st);
+        o.u(st.t0);
+        const pen = st.pts.some((p) => p[3] >= 0);
+        o.b(pen ? 1 : 0); o.u(st.pts.length);
+        let px = 0, py = 0, pt = 0;
+        for (const p of st.pts){
+          o.z(p[0] * 2 - px); o.z(p[1] * 2 - py); o.z(p[2] - pt);
+          px = Math.round(p[0] * 2); py = Math.round(p[1] * 2); pt = p[2];
+          if (pen) o.b(p[3] >= 0 ? Math.round(p[3] * 100) : 255);
+        }
       }
     }
   }
@@ -597,25 +815,31 @@ function packWork(w){
 }
 function unpackWork(buf){
   const r = bytesReader(buf);
-  if (r.b() !== 1) throw new Error("모르는 형식");
+  const ver = r.b();
+  if (ver !== 1 && ver !== 2) throw new Error("모르는 형식");
   const tl = r.u(), tb = new Uint8Array(tl);
   for (let i = 0; i < tl; i++) tb[i] = r.b();
-  const w = { title: new TextDecoder().decode(tb), keys: {} };
-  for (const c of GRID){
-    const si = r.u(), fit = r.b() & 1, ns = r.u(), strokes = [];
-    for (let s = 0; s < ns; s++){
-      const st = { w: r.b(), i: r.b(), s: r.u(), d: r.b(), seed: r.u() | 0, t0: r.u(), pts: [] };
-      const pen = r.b() & 1, np = r.u();
-      let px = 0, py = 0, pt = 0;
-      for (let k = 0; k < np; k++){
-        px += r.z(); py += r.z(); pt += r.z();
-        let p = -1;
-        if (pen){ const v = r.b(); p = v === 255 ? -1 : v / 100; }
-        st.pts.push([px / 2, py / 2, pt, p]);
+  const w = { title: new TextDecoder().decode(tb), banks: [] };
+  for (let b = 0; b < (ver === 1 ? 1 : NB); b++){
+    const keys = {};
+    for (const c of GRID){
+      const si = r.u(), fit = r.b() & 1, ns = r.u(), strokes = [];
+      for (let s = 0; s < ns; s++){
+        const st = STROKE_HEAD[b].r(r);
+        st.t0 = r.u(); st.pts = [];
+        const pen = r.b() & 1, np = r.u();
+        let px = 0, py = 0, pt = 0;
+        for (let k = 0; k < np; k++){
+          px += r.z(); py += r.z(); pt += r.z();
+          let p = -1;
+          if (pen){ const v = r.b(); p = v === 255 ? -1 : v / 100; }
+          st.pts.push([px / 2, py / 2, pt, p]);
+        }
+        strokes.push(st);
       }
-      strokes.push(st);
+      keys[c] = { snd: si ? (SOUNDS[si - 1] || {}).id || null : null, fit: !!fit, strokes };
     }
-    w.keys[c] = { snd: si ? (SOUNDS[si - 1] || {}).id || null : null, fit: !!fit, strokes };
+    w.banks.push({ keys });
   }
   return normalize(w);
 }
@@ -641,9 +865,11 @@ async function decodeWork(str){
   if (kind === "r") return unpackWork(bytes);
   throw new Error("모르는 형식");
 }
-window.ddgmaker = { encodeWork, decodeWork, packWork, get work(){ return work; } };   // 시험용
+window.ddgmaker = { encodeWork, decodeWork, packWork, get work(){ return work; }, get mixMap(){ return mixMap; } };   // 시험용
 
 // ---------- 시작 ----------
+showBankOnStage(BANKS[0]);
+requestAnimationFrame(frame);
 (async function boot(){
   const m = location.hash.match(/^#w=(.+)$/);
   if (m){
