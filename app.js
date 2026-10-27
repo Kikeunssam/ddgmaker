@@ -250,7 +250,8 @@ function drawVec(now){
   vctx.setTransform(1, 0, 0, 1, 0, 0);
   vctx.clearRect(0, 0, vc.width, vc.height);
   if (mode === "make"){
-    if (editLayer && BANKS[editBank].engine) BANKS[editBank].engine.draw(vctx, editLayer, now, vbase);
+    // 다시 그려 보기 중이 아니면 '날아가기' 문양도 제자리에 둔다 (고칠 수 있게)
+    if (editLayer && BANKS[editBank].engine){ BANKS[editBank].engine.draw(vctx, editLayer, now, vbase, !vreplays.length); drawSelection(); }
     return;
   }
   vreplays = vreplays.filter((r) => {
@@ -337,7 +338,7 @@ function buildMotifTools(b){
   MOTIFS[kind].forEach((m, i) => {
     const btn = document.createElement("button"); btn.type = "button"; btn.title = m.name;
     btn.innerHTML = `<img alt="" src="${MotifArt.icon(kind, i)}"><span>${m.name}</span>`;
-    btn.addEventListener("click", () => { mt[b].m = i; drawMotifTools(); });
+    btn.addEventListener("click", () => { mt[b].m = i; selectStamp(null); drawMotifTools(); });
     box.appendChild(btn);
   });
   drawMotifTools();
@@ -346,7 +347,13 @@ function buildMotifTools(b){
   const box = $("mt-anim");
   Patterns.ANIMS.forEach((an, i) => {
     const btn = document.createElement("button"); btn.type = "button"; btn.textContent = an.name;
-    btn.addEventListener("click", () => { if (editBank) { mt[editBank].a = i; drawMotifTools(); } });
+    btn.addEventListener("click", () => {
+      if (!editBank) return;
+      mt[editBank].a = i;
+      const st = selStamp();   // 고른 문양이 있으면 그 문양의 움직임도 바꾸고 다시 보여 준다
+      if (st && st.a !== i){ pushHistory(); st.a = i; restartItem(st); changed(); }
+      drawMotifTools();
+    });
     box.appendChild(btn);
   });
 })();
@@ -357,21 +364,29 @@ function drawMotifTools(){
   [...$("mt-anim").children].forEach((btn, i) => btn.classList.toggle("on", i === sel.a));
   $("mt-sizeV").textContent = mtSize.value; $("mt-rotV").textContent = mtRot.value + "°";
 }
-mtSize.addEventListener("input", drawMotifTools);
-mtRot.addEventListener("input", drawMotifTools);
+// 크기·돌림 막대: 고른 문양이 있으면 그 문양을, 없으면 다음에 찍을 문양을 바꾼다
+let sliderHist = false;
+for (const el of [mtSize, mtRot]){
+  el.addEventListener("input", () => {
+    const st = selStamp();
+    if (st){ if (!sliderHist){ pushHistory(); sliderHist = true; } st.s = +mtSize.value; st.r = +mtRot.value; changed(false); }
+    drawMotifTools();
+  });
+  el.addEventListener("change", () => { sliderHist = false; changed(); });
+}
 
 // 뱅크 고르기
 const bankTabs = [...$("bank-tabs").children];
 bankTabs.forEach((t, b) => t.addEventListener("click", () => selectBank(b)));
 function selectBank(b){
-  if (active) endStroke({ pointerId: active.id });
+  if (active) endStroke({ pointerId: active.id, force: true });
   finishReplays(); vreplays = [];
   editBank = b; lastEndReal = 0;
   bankTabs.forEach((t, i) => t.classList.toggle("on", i === b));
   for (const el of document.querySelectorAll("[data-tools]")) el.hidden = el.dataset.tools !== (BANKS[b].engine ? "stamp" : "ink");
   if (BANKS[b].engine) buildMotifTools(b);
   $("maker").dataset.bank = b;
-  hint.textContent = BANKS[b].engine ? "문양을 골라 종이에 찍어 보시게 (누른 채 끌면 크기와 돌림이 바뀐다네)" : "여기에 붓으로 그려 보시게";
+  hint.textContent = BANKS[b].engine ? "문양을 골라 종이에 찍어 보시게. 찍은 문양은 끌어 옮기고, 모서리 고리로 크기와 돌림을 바꾼다네" : "여기에 붓으로 그려 보시게";
   $("side-tip").textContent = "소리를 누르면 미리 들어 볼 수 있다네. 고른 뒤에는 왼쪽 종이에 이 소리에 어울리는 " + (BANKS[b].engine ? "문양을 찍어 보시게." : "붓질을 그려 보시게.");
   showBankOnStage(BANKS[b]);
   buildSoundPick();
@@ -430,7 +445,8 @@ function drawSide(){
   $("fit").checked = k.fit;
   refreshFit();
   $("undo").disabled = $("clear-key").disabled = $("replay").disabled = !k.strokes.length;
-  $("redo").disabled = !(redoStack[tkey(editBank, cur[editBank])] || []).length;
+  $("undo").disabled = !k.strokes.length && !histOf().undo.length;
+  $("redo").disabled = !histOf().redo.length;
 }
 function refreshFit(){
   if (mode !== "make") return;
@@ -459,6 +475,7 @@ function chooseSound(id){
 }
 
 function showKeyDrawing(code){
+  selIdx = -1;
   replays = []; vreplays = []; sim.fading = false;
   const st = keyOf(work, editBank, code).strokes, bank = BANKS[editBank];
   if (bank.kind === "ink"){
@@ -472,7 +489,7 @@ function showKeyDrawing(code){
 }
 function selectKey(code){
   if (code === cur[editBank] && mode === "make") return;
-  if (active) endStroke({ pointerId: active.id });
+  if (active) endStroke({ pointerId: active.id, force: true });
   cur[editBank] = code; lastEndReal = 0;
   showKeyDrawing(code);
   drawTiles(); drawSide();
@@ -489,38 +506,36 @@ function preview(code){
 }
 
 $("replay").addEventListener("click", () => preview(cur[editBank]));
-// 되돌리기·다시 하기: 되돌린 획·문양은 자판마다 따로 모아 두고, 새로 그리거나 찍으면 버린다.
-const redoStack = {};
-function undo(){
-  const b = editBank, c = cur[b], k = keyOf(work, b, c);
-  if (!k.strokes.length) return;
-  if (active) endStroke({ pointerId: active.id });
+// 되돌리기·다시 하기: 자판마다 바뀌기 전 모습을 쌓아 둔다 (그리기·찍기·옮기기·크기·지우기 모두)
+const hist = {};
+const histOf = (b = editBank, c = cur[editBank]) => (hist[tkey(b, c)] = hist[tkey(b, c)] || { undo: [], redo: [] });
+const snap = (b, strokes) => (BANKS[b].engine ? strokes.map((st) => ({ ...st })) : strokes.slice());
+function pushHistory(b = editBank, c = cur[editBank]){
+  const h = histOf(b, c);
+  h.undo.push(snap(b, keyOf(work, b, c).strokes)); h.redo = [];
+  if (h.undo.length > 100) h.undo.shift();
+}
+function restore(from, to){
+  const b = editBank, c = cur[b], k = keyOf(work, b, c), h = histOf();
+  if (active) endStroke({ pointerId: active.id, force: true });
   finishReplays();
-  (redoStack[tkey(b, c)] = redoStack[tkey(b, c)] || []).push(k.strokes.pop());
-  save();
-  if (BANKS[b].engine){ BANKS[b].engine.pop(editLayer); hint.style.opacity = k.strokes.length ? 0 : 1; }
-  else showKeyDrawing(c);
+  if (!h[from].length){
+    if (from !== "undo" || !k.strokes.length) return;
+    h[from].push(k.strokes.slice(0, -1));   // 이 화면을 열기 전에 그린 것도 하나씩 되돌린다
+  }
+  h[to].push(snap(b, k.strokes));
+  k.strokes = h[from].pop();
+  selectStamp(null); save(); showKeyDrawing(c);
   setThumb(b, c, k.strokes.length ? bakeThumb(b, k.strokes) : null); drawSide();
   lastEndReal = 0;
 }
-function redo(){
-  const b = editBank, c = cur[b], k = keyOf(work, b, c), stack = redoStack[tkey(b, c)];
-  if (!stack || !stack.length) return;
-  if (active) endStroke({ pointerId: active.id });
-  finishReplays();
-  const st = stack.pop();
-  k.strokes.push(st); save();
-  if (BANKS[b].engine){ BANKS[b].engine.add(editLayer, st, performance.now()); hint.style.opacity = 0; }   // 문양은 다시 나타나는 움직임을 보여 준다
-  else showKeyDrawing(c);
-  drawSide(); drawTile(c); scheduleThumb(b, c);
-  lastEndReal = 0;
-}
+const undo = () => restore("undo", "redo"), redo = () => restore("redo", "undo");
 $("undo").addEventListener("click", undo);
 $("redo").addEventListener("click", redo);
 $("clear-key").addEventListener("click", () => {
   const c = cur[editBank], k = keyOf(work, editBank, c); if (!k.strokes.length) return;
   if (!confirm(`${JAMO[c]} 자판의 ${BANKS[editBank].engine ? "문양" : "그림"}을 모두 지우겠는가?`)) return;
-  k.strokes = []; delete redoStack[tkey(editBank, c)]; save(); showKeyDrawing(c); setThumb(editBank, c, null); drawSide();
+  pushHistory(); k.strokes = []; selectStamp(null); save(); showKeyDrawing(c); setThumb(editBank, c, null); drawSide();
 });
 $("title").addEventListener("input", () => { work.title = $("title").value.slice(0, 30); save(); });
 
@@ -531,14 +546,15 @@ function stagePoint(ev){
   return { x: (ev.clientX - r.left) / r.width * LW, y: (ev.clientY - r.top) / r.height * LH };
 }
 stage.addEventListener("pointerdown", (e) => {
-  if (mode !== "make" || active) return;
+  if (mode !== "make") return;
+  const b = editBank, bank = BANKS[b], strokes = keyOf(work, b, cur[b]).strokes;
+  if (active && !(bank.engine && e.pointerType === "touch")) return;
   e.preventDefault();
   if (replays.length || vreplays.length) finishReplays();
   try { stage.setPointerCapture(e.pointerId); } catch (_){}
   hint.style.opacity = 0;
-  const b = editBank, bank = BANKS[b], strokes = keyOf(work, b, cur[b]).strokes;
   const now = performance.now();
-  if (bank.engine){ startStamp(e, b, strokes, now); return; }
+  if (bank.engine){ stampDown(e, b, strokes, now); return; }
   let t0 = 0;
   if (strokes.length){
     const prev = strokes[strokes.length - 1];
@@ -548,33 +564,156 @@ stage.addEventListener("pointerdown", (e) => {
   t0 = Math.round(t0);
   const st = { w: +ui.water.value, i: +ui.ink.value, s: +ui.size.value, d: ui.deplete.checked ? 1 : 0, seed: (Math.random() * 1e9) | 0, t0, pts: [] };
   const brush = Ink.makeBrush(st, sim);
+  pushHistory();
   strokes.push(st);
-  delete redoStack[tkey(b, cur[b])];
   active = { st, brush, ts0: e.timeStamp, tsOff: now - e.timeStamp, id: e.pointerId, b, code: cur[b] };
   addPt(e);
 });
-// 문양 찍기: 누른 자리에 찍고, 누른 채 끌면 끈 길이만큼 크기, 끈 방향만큼 돌림이 바뀐다.
+// ---------- 문양 찍기와 고치기 ----------
+// 빈 곳을 누르면 찍고(찍은 문양이 골라진다), 찍힌 문양을 누르면 고른다. 고른 문양은
+// 끌어 옮기고, 오른쪽 아래 고리를 끌어 크기·돌림을 바꾸고, 오른쪽 위 ✕로 지운다.
+// 터치는 두 손가락으로 벌리고 돌리고, 마우스는 휠로 크기(Shift+휠은 돌림)를 바꾼다.
 // 나타나는 때(t0)는 앞 문양을 찍은 뒤 쉰 시간 (GAP_MIN~GAP_MAX 안으로 줄인다)
-function startStamp(e, b, stamps, now){
-  const p = stagePoint(e), sel = mt[b];
+let selIdx = -1;
+const touches = new Map();
+const selStamp = () => (BANKS[editBank].engine && selIdx >= 0 ? keyOf(work, editBank, cur[editBank]).strokes[selIdx] || null : null);
+function selectStamp(i){
+  selIdx = i == null ? -1 : i;
+  const st = selStamp();
+  if (st){ mtSize.value = st.s; mtRot.value = st.r; mt[editBank].a = st.a; drawMotifTools(); }
+}
+// 문양을 바꾼 뒤: 저장·미리보기 그림 (final이 거짓이면 끄는 중이라 저장만 미룬다)
+function changed(final = true){
+  if (!final) return;
+  save(); drawSide(); drawTile(cur[editBank]); scheduleThumb(editBank, cur[editBank]);
+}
+function restartItem(st){ const it = editLayer && editLayer.items.find((x) => x.st === st); if (it){ it.rb = performance.now(); it.doneAt = null; } }
+const screenK = () => LW / stage.getBoundingClientRect().width;   // 화면 1px = 종이 몇 px
+const rad = (st) => st.r * Math.PI / 180;
+function local(st, p){ const a = -rad(st), dx = p.x - st.x, dy = p.y - st.y; return { x: dx * Math.cos(a) - dy * Math.sin(a), y: dx * Math.sin(a) + dy * Math.cos(a) }; }
+function corner(st, sx, sy){ const h = st.s / 2, a = rad(st); return { x: st.x + (sx * h) * Math.cos(a) - (sy * h) * Math.sin(a), y: st.y + (sx * h) * Math.sin(a) + (sy * h) * Math.cos(a) }; }
+function hitStamp(p){
+  const stamps = keyOf(work, editBank, cur[editBank]).strokes;
+  for (let i = stamps.length - 1; i >= 0; i--){ const q = local(stamps[i], p), h = stamps[i].s * 0.42; if (Math.abs(q.x) < h && Math.abs(q.y) < h) return i; }
+  return -1;
+}
+function hitHandle(p){
+  const st = selStamp(); if (!st) return null;
+  const r = 22 * screenK();
+  const near = (q) => Math.hypot(q.x - p.x, q.y - p.y) < r;
+  if (near(corner(st, 1, -1))) return "delete";
+  if (near(corner(st, 1, 1))) return "resize";
+  return null;
+}
+function drawSelection(){
+  const st = selStamp(); if (!st) return;
+  const k = screenK() * 1, g = vctx;
+  g.save();
+  g.setTransform(vbase, 0, 0, vbase, 0, 0);
+  g.translate(st.x, st.y); g.rotate(rad(st));
+  const h = st.s / 2, dark = BANKS[editBank].tone === "black";
+  g.lineWidth = 1.5 * k; g.setLineDash([6 * k, 5 * k]);
+  g.strokeStyle = dark ? "rgba(255,255,255,0.75)" : "rgba(40,30,25,0.7)";
+  g.strokeRect(-h, -h, h * 2, h * 2);
+  g.setLineDash([]);
+  const knob = (x, y, fillc, draw) => { g.beginPath(); g.arc(x, y, 11 * k, 0, Math.PI * 2); g.fillStyle = fillc; g.fill(); g.lineWidth = 2 * k; g.strokeStyle = "#fff"; g.stroke(); g.strokeStyle = "#fff"; g.lineWidth = 2 * k; g.lineCap = "round"; draw(x, y); };
+  knob(h, h, "#2b2622", (x, y) => { g.beginPath(); g.arc(x, y, 5 * k, -0.3, 4.2); g.stroke(); g.beginPath(); g.moveTo(x + 5 * k * Math.cos(4.2) - 3 * k, y + 5 * k * Math.sin(4.2)); g.lineTo(x + 5 * k * Math.cos(4.2), y + 5 * k * Math.sin(4.2)); g.lineTo(x + 5 * k * Math.cos(4.2), y + 5 * k * Math.sin(4.2) + 3 * k); g.stroke(); });
+  knob(h, -h, "#b43f2c", (x, y) => { const d = 4 * k; g.beginPath(); g.moveTo(x - d, y - d); g.lineTo(x + d, y + d); g.moveTo(x + d, y - d); g.lineTo(x - d, y + d); g.stroke(); });
+  g.restore();
+}
+function deleteSelected(){
+  const st = selStamp(); if (!st) return;
+  pushHistory();
+  keyOf(work, editBank, cur[editBank]).strokes.splice(selIdx, 1);
+  selectStamp(null); showKeyDrawing(cur[editBank]); changed();
+}
+function stampDown(e, b, stamps, now){
+  const p = stagePoint(e);
+  touches.set(e.pointerId, p);
+  if (touches.size === 2 && selStamp()){   // 두 손가락: 벌리고 돌리기
+    const [p1, p2] = [...touches.values()], st = selStamp();
+    if (!(active && active.pushed)) pushHistory();
+    active = { stamp: true, mode: "pinch", id: e.pointerId, b, code: cur[b], pushed: true,
+      d0: Math.hypot(p2.x - p1.x, p2.y - p1.y), a0: Math.atan2(p2.y - p1.y, p2.x - p1.x), m0: { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 }, s0: st.s, r0: st.r, x0: st.x, y0: st.y };
+    return;
+  }
+  if (active) return;
+  const handle = hitHandle(p);
+  if (handle === "delete"){ deleteSelected(); touches.delete(e.pointerId); return; }
+  if (handle === "resize"){
+    const st = selStamp();
+    active = { stamp: true, mode: "resize", id: e.pointerId, b, code: cur[b], pushed: false, v0: { x: p.x - st.x, y: p.y - st.y }, s0: st.s, r0: st.r };
+    return;
+  }
+  const hit = hitStamp(p);
+  if (hit >= 0){
+    selectStamp(hit);
+    const st = selStamp();
+    active = { stamp: true, mode: "move", id: e.pointerId, b, code: cur[b], pushed: false, p0: p, x0: st.x, y0: st.y };
+    return;
+  }
+  // 빈 곳: 새로 찍는다
+  pushHistory();
   let t0 = 0;
   if (stamps.length){
     const gap = lastEndReal ? now - lastEndReal : 300;
-    t0 = stamps[stamps.length - 1].t0 + Math.min(Patterns.GAP_MAX, Math.max(Patterns.GAP_MIN, gap));
+    t0 = Math.max(...stamps.map((x) => x.t0)) + Math.min(Patterns.GAP_MAX, Math.max(Patterns.GAP_MIN, gap));
   }
+  const sel = mt[b];
   const st = { m: sel.m, x: Math.round(p.x), y: Math.round(p.y), s: +mtSize.value, r: +mtRot.value, a: sel.a, t0: Math.round(t0) };
   stamps.push(st);
-  delete redoStack[tkey(b, cur[b])];
   BANKS[b].engine.add(editLayer, st, now);
   lastEndReal = now;
-  active = { stamp: true, st, x0: p.x, y0: p.y, s0: st.s, r0: st.r, id: e.pointerId, b, code: cur[b] };
+  selIdx = stamps.length - 1;
+  active = { stamp: true, mode: "move", id: e.pointerId, b, code: cur[b], pushed: true, p0: p, x0: st.x, y0: st.y };
 }
-function moveStamp(e){
-  const p = stagePoint(e), A = active, dx = p.x - A.x0, dy = p.y - A.y0, d = Math.hypot(dx, dy);
-  if (d < 14){ A.st.s = A.s0; A.st.r = A.r0; return; }
-  A.st.s = Math.round(Math.min(900, Math.max(30, d * 2)));
-  A.st.r = Math.round(((A.r0 + Math.atan2(dy, dx) * 180 / Math.PI) % 360 + 360) % 360);
+const clampS = (s) => Math.round(Math.min(900, Math.max(30, s)));
+const wrapR = (r) => Math.round(((r % 360) + 360) % 360);
+function stampMove(e){
+  const p = stagePoint(e);
+  if (touches.has(e.pointerId)) touches.set(e.pointerId, p);
+  const A = active, st = selStamp();
+  if (!st) return;
+  if (A.mode === "pinch"){
+    if (touches.size < 2) return;
+    const [p1, p2] = [...touches.values()];
+    const d = Math.hypot(p2.x - p1.x, p2.y - p1.y), a = Math.atan2(p2.y - p1.y, p2.x - p1.x), m = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+    st.s = clampS(A.s0 * d / Math.max(1, A.d0)); st.r = wrapR(A.r0 + (a - A.a0) * 180 / Math.PI);
+    st.x = Math.round(A.x0 + m.x - A.m0.x); st.y = Math.round(A.y0 + m.y - A.m0.y);
+  } else if (e.pointerId !== A.id) return;
+  else if (A.mode === "move"){
+    const dx = p.x - A.p0.x, dy = p.y - A.p0.y;
+    if (!A.pushed){ if (Math.hypot(dx, dy) < 3 * screenK()) return; pushHistory(); A.pushed = true; }
+    st.x = Math.round(Math.min(LW, Math.max(0, A.x0 + dx))); st.y = Math.round(Math.min(LH, Math.max(0, A.y0 + dy)));
+  } else if (A.mode === "resize"){
+    if (!A.pushed){ pushHistory(); A.pushed = true; }
+    const v = { x: p.x - st.x, y: p.y - st.y };
+    st.s = clampS(A.s0 * Math.hypot(v.x, v.y) / Math.max(1, Math.hypot(A.v0.x, A.v0.y)));
+    st.r = wrapR(A.r0 + (Math.atan2(v.y, v.x) - Math.atan2(A.v0.y, A.v0.x)) * 180 / Math.PI);
+  }
+  mtSize.value = st.s; mtRot.value = st.r; drawMotifTools();
 }
+function stampUp(e){
+  if (e.force) touches.clear(); else touches.delete(e.pointerId);
+  if (!active) return;
+  if (active.mode === "pinch"){ if (touches.size) return; }
+  else if (e.pointerId !== active.id) return;
+  const { code } = active;
+  active = null;
+  save(); drawSide(); drawTile(code); scheduleThumb(editBank, code);
+}
+// 휠: 고른 문양 크기 (Shift는 돌림)
+let wheelT = 0;
+stage.addEventListener("wheel", (e) => {
+  const st = mode === "make" && selStamp();
+  if (!st) return;
+  e.preventDefault();
+  if (!wheelT) pushHistory();
+  clearTimeout(wheelT); wheelT = setTimeout(() => { wheelT = 0; changed(); }, 400);
+  const dy = e.deltaY || e.deltaX;
+  if (e.shiftKey) st.r = wrapR(st.r + dy * 0.15); else st.s = clampS(st.s * Math.exp(-dy * 0.0015));
+  mtSize.value = st.s; mtRot.value = st.r; drawMotifTools();
+}, { passive: false });
 function addPt(ev){
   const p = stagePoint(ev);
   const pt = { x: Math.round(p.x * 2) / 2, y: Math.round(p.y * 2) / 2,
@@ -585,12 +724,14 @@ function addPt(ev){
   active.lastMove = performance.now(); active.lastEv = ev;
 }
 stage.addEventListener("pointermove", (e) => {
+  if (active && active.stamp){ stampMove(e); return; }
   if (!active || e.pointerId !== active.id) return;
-  if (active.stamp){ moveStamp(e); return; }
   const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
   for (const ev of (evs.length ? evs : [e])) addPt(ev);
 });
 function endStroke(e){
+  if (active && active.stamp){ stampUp(e); return; }
+  touches.delete(e.pointerId);
   if (!active || e.pointerId !== active.id) return;
   const { b, code } = active;
   if (!active.stamp) lastEndReal = performance.now();
@@ -604,14 +745,14 @@ stage.addEventListener("pointercancel", endStroke);
 let playFrom = "make", playBank = 0, mixMap = null;
 function enterPlay(w, from){
   playing = w; playFrom = from;
-  if (active) endStroke({ pointerId: active.id });
+  if (active) endStroke({ pointerId: active.id, force: true });
   mode = "play";
   $("maker").hidden = true; $("play").hidden = false;
   $("play").appendChild(stage);
   hint.style.opacity = 0;
   setPlayBank(0, false);
-  fitVec();   // 문양 그림을 연주 화면 크기로 미리 그려 둔다 (처음 누를 때 멈칫하지 않게)
-  BANKS.forEach((bank, b) => { if (bank.engine) for (const c of GRID) for (const st of keyOf(playing, b, c).strokes) MotifArt.sprite(bank.kind, st.m, st.s * vbase); });
+  fitVec();   // 단청 그림을 연주 화면 크기로 미리 그려 둔다 (처음 누를 때 멈칫하지 않게)
+  BANKS.forEach((bank, b) => { if (bank.kind === "dc") for (const c of GRID) for (const st of keyOf(playing, b, c).strokes) MotifArt.sprite(bank.kind, st.m, st.s * vbase); });
   for (const bk of playing.banks) for (const c of GRID) ensureSound(bk.keys[c].snd).catch(() => {});
 }
 // 섞음: 들어올 때마다 뱅크 1·2·3에서 9·9·8개(8개 뱅크는 무작위)를 겹치지 않게 골라 26자판에 섞어 놓는다.
@@ -807,6 +948,8 @@ addEventListener("keydown", (e) => {
   }
   // 만들기
   if (e.target.closest && e.target.closest("button") && (e.key === "Enter" || e.code === "Space")) return;
+  if (selStamp() && (e.key === "Delete" || e.key === "Backspace")){ e.preventDefault(); deleteSelected(); return; }
+  if (e.key === "Escape"){ selectStamp(null); return; }
   const n = ["Digit1", "Digit2", "Digit3", "Digit4"].indexOf(e.code);
   if (n >= 0 && editBank === 0){ applyPreset(presetBtns[n]); return; }
   if (GRID.includes(code)){

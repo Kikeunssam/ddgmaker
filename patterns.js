@@ -11,6 +11,7 @@ const GAP_MIN = 60, GAP_MAX = 600;   // 찍는 사이 쉬는 시간 (기록할 �
 
 // ---------- 움직임 ----------
 // u: 나타나는 정도 0→1, live: 다 나타난 뒤에도 계속되는 움직임용 시계(ms), ph: 문양마다 다른 박자
+// away: 다 나타난 뒤 흐른 시간(ms, 만들기 화면에서는 0), head: 문양이 바라보는 쪽(라디안, 화면 기준)
 const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
 const easeOut = (x) => 1 - Math.pow(1 - x, 3);
 const easeInOut = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
@@ -35,16 +36,26 @@ const ANIMS = [
   { name: "빙글빙글", f: (u, live, ph) => ({ k: easeOut(u), al: clamp01(u * 2), rot: live * 0.0018 + ph }) },
   { name: "두근두근", f: (u, live, ph) => ({ k: Math.max(0, easeBack(u)) * (1 + 0.07 * Math.max(0, Math.sin(live * 0.009 + ph)) ** 3), al: clamp01(u * 3) }) },
   { name: "반짝반짝", f: (u, live, ph) => ({ al: clamp01(u * 1.5) * (u < 1 ? 0.55 + 0.45 * Math.abs(Math.sin(u * 14)) : 1), glow: 0.5 + 0.5 * Math.sin(live * 0.006 + ph) }) },
+  { name: "날아가기", f: (u, live, ph, away, head) => {
+    const d = 130 * Math.pow(away / 1000, 1.3), w = Math.sin(away * 0.004 + ph) * 22 * Math.min(1, away / 600);
+    return { k: Math.max(0, easeBack(u)), al: clamp01(u * 3), dx: Math.cos(head) * d - Math.sin(head) * w, dy: Math.sin(head) * d + Math.cos(head) * w };
+  } },
 ];
 
 // base: 그림 판의 실제 픽셀 / 논리 크기(1200×750) 비율. 문양은 화면에 보이는 크기에 맞춘 그림으로 그린다.
-function drawStamp(ctx, kind, st, age, live, base = 1){
+// 자개는 장면마다 조각을 움직여 새로 그리고(MotifArt.jagae), 둘레에 은은한 빛을 두른다.
+function drawStamp(ctx, kind, st, age, live, base = 1, away = 0){
   const u = clamp01(age / ANIM_MS);
   const ph = (st.x * 0.013 + st.y * 0.007) % 6.283;
-  const o = (ANIMS[st.a] || ANIMS[0]).f(u, live, ph);
+  const motif = MOTIFS[kind][st.m];
+  if (!motif) return;
+  const head = st.r * Math.PI / 180 + (motif.head || 0);
+  const o = (ANIMS[st.a] || ANIMS[0]).f(u, live, ph, away, head);
   const al = o.al == null ? 1 : o.al, k = o.k == null ? 1 : o.k;
   if (al <= 0.003 || k <= 0.003) return;
-  const im = MotifArt.sprite(kind, st.m, st.s * base);   // 움직이는 동안 크기가 바뀌어도 같은 그림을 쓴다
+  const jg = kind === "jg";
+  // 움직이는 동안 크기가 바뀌어도 같은 크기의 그림을 쓴다
+  const im = jg ? MotifArt.jagae(st.m, st.s * base, live / 1000 + ph, live, ph) : MotifArt.sprite(kind, st.m, st.s * base);
   if (!im) return;
   const w = im.width, h = im.height;
   const sc = st.s / w * k * base;
@@ -57,7 +68,9 @@ function drawStamp(ctx, kind, st, age, live, base = 1){
     if (o.wipe <= 0){ ctx.restore(); return; }
     ctx.beginPath(); ctx.rect(-w / 2, -h / 2, w * o.wipe, h); ctx.clip();
   }
+  if (jg){ ctx.shadowColor = "rgba(205,225,255,0.5)"; ctx.shadowBlur = 16 * base * Math.min(1, st.s / 200); }
   ctx.drawImage(im, -w / 2, -h / 2);
+  ctx.shadowBlur = 0;
   if (o.glow){   // 빛을 받아 반짝이는 순간
     ctx.globalCompositeOperation = "lighter";
     ctx.globalAlpha *= 0.55 * o.glow * o.glow;
@@ -73,10 +86,15 @@ function makeEngine(kind){
     kind,
     newLayer(){ return { items: [] }; },
     clear(L){ L.items.length = 0; },
-    add(L, st, rb){ const it = { st, age: 0, rb: rb == null ? null : rb }; L.items.push(it); return it; },
+    add(L, st, rb){ const it = { st, age: 0, rb: rb == null ? null : rb, doneAt: null }; L.items.push(it); return it; },
     pop(L){ L.items.pop(); },
-    draw(ctx, L, now, base = 1){
-      for (const it of L.items) drawStamp(ctx, kind, it.st, it.rb != null ? now - it.rb : it.age, now, base);
+    // still: 만들기 화면에서 고칠 때는 날아가지 않고 제자리에 있게
+    draw(ctx, L, now, base = 1, still = false){
+      for (const it of L.items){
+        const age = it.rb != null ? now - it.rb : it.age;
+        if (still || age < ANIM_MS) it.doneAt = null; else if (it.doneAt == null) it.doneAt = now;
+        drawStamp(ctx, kind, it.st, age, now, base, it.doneAt == null ? 0 : now - it.doneAt);
+      }
     },
   };
 }
