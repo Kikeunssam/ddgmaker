@@ -1,6 +1,6 @@
 {
   "hosting": {
-    "site": "dungdanggi-make",
+    "site": "ddgmaker",
     "public": ".",
     "ignore": [
       "firebase.json",
