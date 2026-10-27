@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <link rel="icon" href="data:,">
+  <title>둥당기 메이커</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- 먹이 번지는 종이. 만들기 화면과 연주 화면이 이 종이 하나를 옮겨 가며 쓴다 -->
+  <div id="stage">
+    <canvas id="paper"></canvas>
+    <canvas id="inkc"></canvas>
+    <div id="hint">여기에 붓으로 그려 보세요</div>
+  </div>
+
+  <!-- 시작 화면 -->
+  <div id="start">
+    <div class="band top"></div>
+    <div class="band"></div>
+    <a class="btn small corner" href="https://litt.ly/kikeunssam" target="_blank" rel="noopener noreferrer"><span>개발자 문의</span></a>
+    <main class="start-main">
+      <div class="logo"><img src="assets/logo_B.svg" alt="둥당기"><span class="tag">메이커</span></div>
+      <div class="sub" id="start-sub">우리 소리로 그리는 나만의 수묵화</div>
+      <div class="btns" id="start-own">
+        <button type="button" id="start-make" class="btn primary"><span>만들기</span></button>
+        <button type="button" class="btn start-help"><span>사용 방법</span></button>
+      </div>
+      <div class="btns" id="start-shared" hidden>
+        <button type="button" id="start-play" class="btn primary"><span>연주하기</span></button>
+        <button type="button" id="start-remix" class="btn"><span>고쳐 만들기</span></button>
+        <button type="button" class="btn start-help"><span>사용 방법</span></button>
+      </div>
+      <div class="hint" id="start-hint">아무 키나 누르면 시작해요</div>
+    </main>
+    <footer class="start-footer"><span>© 2026 키큰쌤. All rights reserved.</span><i>|</i><span>Inspired by Lullatone &amp; Jono Brandel’s Patatap</span><i>|</i><span>모든 음원 샘플은 국립국악원 ‘국악 디지털 음원’ 자료를 활용하였습니다.</span></footer>
+  </div>
+
+  <!-- 만들기 화면 -->
+  <div id="maker" hidden>
+    <header class="bar">
+      <h1>둥당기 메이커</h1>
+      <input id="title" maxlength="30" placeholder="작품 이름을 지어 주세요" autocomplete="off" spellcheck="false">
+      <span class="spacer"></span>
+      <button type="button" id="open-help" class="ghost">사용 방법</button>
+      <button type="button" id="open-share">링크 만들기</button>
+      <button type="button" id="open-play" class="primary">연주하기</button>
+    </header>
+
+    <div class="work">
+      <section class="paper-col">
+        <div class="tools">
+          <div class="presets" id="presets">
+            <button type="button" data-w="35" data-i="100">농묵 · 진한 먹</button>
+            <button type="button" data-w="65" data-i="28">담묵 · 옅은 먹</button>
+            <button type="button" data-w="95" data-i="65">번지는 붓</button>
+            <button type="button" data-w="6" data-i="95">마른 붓 · 갈필</button>
+          </div>
+          <label>물 <input type="range" id="water" min="0" max="100" value="55"><span class="val" id="waterV"></span></label>
+          <label>먹 <input type="range" id="ink" min="5" max="100" value="80"><span class="val" id="inkV"></span></label>
+          <label>굵기 <input type="range" id="size" min="6" max="160" value="40"><span class="val" id="sizeV"></span></label>
+          <label><input type="checkbox" id="deplete" checked> 먹이 점점 줄어듦</label>
+        </div>
+        <div id="stage-box"></div>
+        <div class="under">
+          <button type="button" id="replay">▶ 다시 그려 보기</button>
+          <button type="button" id="undo">한 획 지우기</button>
+          <button type="button" id="clear-key">이 키 그림 지우기</button>
+          <span class="spacer"></span>
+          <span id="dur"></span>
+        </div>
+        <div id="keyboard"></div>
+      </section>
+
+      <aside class="side">
+        <div class="cur"><kbd id="cur-key">G</kbd><div><b id="cur-sound"></b><small>이 키의 소리와 그림</small></div></div>
+        <h2>소리 고르기</h2>
+        <div id="sound-pick"></div>
+        <h2>다시 그리는 빠르기</h2>
+        <label class="fit"><input type="checkbox" id="fit" checked> 소리 길이에 맞추기</label>
+        <p class="fit-info" id="fit-info"></p>
+        <p class="tip">소리를 누르면 들어 볼 수 있어요. 고른 다음 왼쪽 종이에 이 소리에 어울리는 붓질을 그려 보세요.</p>
+      </aside>
+    </div>
+
+  </div>
+
+  <!-- 연주 화면 -->
+  <div id="play" hidden>
+    <button type="button" id="play-exit">나가기</button>
+  </div>
+
+  <!-- 사용 방법 -->
+  <div id="help" class="veil" hidden>
+    <div class="card" role="dialog" aria-modal="true" aria-labelledby="help-title">
+      <h2 id="help-title">사용 방법</h2>
+      <dl>
+        <dt>만들기</dt><dd><span class="s">아래 자판에서 키를 하나 고르고,</span> <span class="s">오른쪽에서 소리를 고른 뒤,</span> <span class="s">종이에 붓으로 그려요.</span> <span class="s">그린 그림은 그 키에 바로 담겨요.</span></dd>
+        <dt>붓</dt><dd><span class="s">천천히 그으면 굵고, 빠르게 그으면 가늘어요.</span> <span class="s">물이 많으면 번지고, 적으면 붓결이 갈라져요.</span> <span class="s">붓을 멈추고 누르고 있으면 먹이 고여요.</span> <span class="s"><kbd>1</kbd> ~ <kbd>4</kbd> 붓 고르기.</span></dd>
+        <dt>연주하기</dt><dd><span class="s">키를 누르면 소리와 함께 그림이 처음부터 다시 그려지고, 다 그려지면 스르르 사라져요.</span> <span class="s">스마트기기는 화면을 터치해요.</span> <span class="s"><kbd>Esc</kbd> 만들기로 돌아가기.</span></dd>
+        <dt>링크 만들기</dt><dd><span class="s">링크를 친구에게 보내면 친구도 내 작품을 연주하고, 고쳐서 자기 작품으로 만들 수 있어요.</span></dd>
+      </dl>
+      <div class="close"><button type="button" id="help-close" class="btn"><span>닫기</span></button></div>
+    </div>
+  </div>
+
+  <!-- 링크 만들기 -->
+  <div id="share" class="veil" hidden>
+    <div class="card" role="dialog" aria-modal="true" aria-labelledby="share-title">
+      <h2 id="share-title">링크 만들기</h2>
+      <p class="s">이 링크를 열면 누구나 내 작품을 연주할 수 있어요.</p>
+      <textarea id="share-link" readonly rows="4"></textarea>
+      <p class="note" id="share-note"></p>
+      <div class="close">
+        <button type="button" id="share-copy" class="btn primary"><span>복사하기</span></button>
+        <button type="button" id="share-close" class="btn"><span>닫기</span></button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" hidden></div>
+
+  <script src="sounds-list.js"></script>
+  <script>
+    // 파일로 바로 열 때만 음원 묶음(sounds.js)을 읽는다. 웹 서버로 열면 음원 파일을 직접 받는다.
+    if (location.protocol === "file:") document.write('<script src="sounds.js"><\/script>');
+  </script>
+  <script src="ink.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
