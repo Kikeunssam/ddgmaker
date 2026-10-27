@@ -90,7 +90,7 @@
   </div>
   <label>물 <input type="range" id="water" min="0" max="100" value="55"><span class="val" id="waterV"></span></label>
   <label>먹 <input type="range" id="ink" min="5" max="100" value="80"><span class="val" id="inkV"></span></label>
-  <label>굵기 <input type="range" id="size" min="4" max="70" value="24"><span class="val" id="sizeV"></span></label>
+  <label>굵기 <input type="range" id="size" min="6" max="160" value="40"><span class="val" id="sizeV"></span></label>
   <label><input type="checkbox" id="deplete" checked> 먹이 점점 줄어듦</label>
   <span class="spacer"></span>
   <button id="clear">새 종이</button>
@@ -126,18 +126,20 @@ const GW = Math.floor(LW / SC), GH = Math.floor(LH / SC), N = GW * GH;
 // ---------- 시뮬레이션 상수 ----------
 const STEP_MS = 1000 / 120;
 const K = 0.07;           // 물 퍼짐
-const KP = 0.04;          // 젖은 곳끼리 먹 섞임
+const KP = 0.03;          // 젖은 곳끼리 먹 섞임
 const MINW = 0.015;       // 이보다 적으면 마른 칸
 const SPREAD = 0.11;      // 마른 종이로 번져 나가려면 필요한 물
 const EVAP = 0.0006;      // 증발
-const EDGE_EVAP = 0.0018; // 가장자리(물이 얇은 곳) 추가 증발 → 테두리가 진해짐
+const EDGE_EVAP = 0.0013; // 가장자리(물이 얇은 곳) 추가 증발 → 테두리가 진해짐
 const EDGE_T = 0.22;
-const DEP = 0.006;         // 먹이 종이에 가라앉는 속도
+const DEP = 0.009;         // 먹이 종이에 가라앉는 속도
 const WMAX = 4;
 
 const W = new Float32Array(N), S = new Float32Array(N), D = new Float32Array(N);
 const dW = new Float32Array(N), dS = new Float32Array(N);
 const A = new Float32Array(N);   // 종이 흡수도 (닥나무 섬유 결)
+const G = new Float32Array(N);   // 고운 종이 결 (먹 속에 비치는 결)
+{ const r = mulberry32(99); for (let i = 0; i < N; i++) G[i] = r(); }
 
 let bx0 = GW, by0 = GH, bx1 = -1, by1 = -1;      // 젖은 영역
 let rx0 = GW, ry0 = GH, rx1 = -1, ry1 = -1;      // 다시 그릴 영역
@@ -201,9 +203,9 @@ const ic = document.getElementById('inkc');
 ic.width = GW; ic.height = GH;
 const ictx = ic.getContext('2d');
 const img = ictx.createImageData(GW, GH), pix = img.data;
-for (let i = 0; i < N; i++){ pix[i*4] = 24; pix[i*4+1] = 22; pix[i*4+2] = 26; pix[i*4+3] = 0; }
+for (let i = 0; i < N; i++){ pix[i*4] = 12; pix[i*4+1] = 11; pix[i*4+2] = 14; pix[i*4+3] = 0; }
 const ALUT = new Uint8ClampedArray(4096);
-for (let k = 0; k < 4096; k++){ const p = k / 512; ALUT[k] = 255 * (1 - Math.exp(-3.0 * p)); }
+for (let k = 0; k < 4096; k++){ const p = k / 512; ALUT[k] = 255 * (1 - Math.exp(-3.4 * p)); }
 
 function markR(x0,y0,x1,y1){ if(x0<rx0)rx0=x0; if(y0<ry0)ry0=y0; if(x1>rx1)rx1=x1; if(y1>ry1)ry1=y1; }
 function markB(x0,y0,x1,y1){ if(x0<bx0)bx0=x0; if(y0<by0)by0=y0; if(x1>bx1)bx1=x1; if(y1>by1)by1=y1; }
@@ -214,7 +216,7 @@ function render(){
     let i = y*GW + rx0;
     for (let x = rx0; x <= rx1; x++, i++){
       const p = S[i] + D[i];
-      let a = ALUT[Math.min(4095, (p*512)|0)];
+      let a = ALUT[Math.min(4095, (p*512)|0)] * (0.84 + 0.16*G[i]);
       const w = W[i];
       if (w > 0) a += (255 - a) * Math.min(0.09, w * 0.06);   // 젖은 종이는 살짝 어둡게
       pix[i*4+3] = a;
@@ -239,8 +241,8 @@ function flow(i, j){
   else if (wj < MINW){ const a = A[j]; if (wi*a*a < SPREAD) return; }
   const f = K * (A[i] + A[j]) * (wi - wj);
   let m;
-  if (f > 0){ m = f * C[i]; if (wj < EDGE_T) m *= 0.6; }        // 번져 나가는 물은 먹을 덜 데려감
-  else { m = f * C[j]; if (wi < EDGE_T) m *= 0.6; }
+  if (f > 0){ m = f * C[i]; if (wj < EDGE_T) m *= 0.8; }        // 번져 나가는 물은 먹을 조금 덜 데려감
+  else { m = f * C[j]; if (wi < EDGE_T) m *= 0.8; }
   if (wi >= MINW && wj >= MINW) m += KP * (C[i] - C[j]) * (wi < wj ? wi : wj);
   dW[i] -= f; dW[j] += f; dS[i] -= m; dS[j] += m;
 }
@@ -287,9 +289,13 @@ function simStep(){
 function makeBrush(st){
   const water = st.w/100, ink = st.i/100, size = st.s, deplete = st.d;
   const rnd = mulberry32(st.seed);
-  const NB = 20, br0 = new Float32Array(NB), br = new Float32Array(NB);
+  const NB = clamp(Math.round(size/3), 12, 48), br0 = new Float32Array(NB), br = new Float32Array(NB);
   for (let k = 0; k < NB; k++) br0[k] = 0.25 + 0.75*rnd();
+  const side = rnd() < 0.5 ? -1 : 1;   // 붓 한쪽에 먹이 더 많이 묻어 있음 → 한 획 안의 농담
   for (let k = 0; k < NB; k++) br[k] = (br0[Math.max(0,k-1)] + 2*br0[k] + br0[Math.min(NB-1,k+1)]) / 4;
+  // 획을 따라 먹이 짙어졌다 옅어졌다 (60px 간격 값 잡음)
+  const lat = new Float32Array(64); for (let k = 0; k < 64; k++) lat[k] = rnd();
+  const along = d => { const t = d/60, k = t|0, f = t-k, sm = f*f*(3-2*f); return 0.72 + 0.4*(lat[k&63] + (lat[(k+1)&63]-lat[k&63])*sm); };
   let last = null, lastR = 0, dist = 0, speed = -1, gap = 0;
 
   function dab(x, y, r, nx, ny, d, sp){
@@ -298,8 +304,10 @@ function makeBrush(st){
     const wl = Math.max(0.03, water * Math.pow(load, 0.8));
     const dryness = Math.max(clamp(1 - wl/0.3, 0, 1), clamp(1 - load*3, 0, 1));
     const kpd = Math.min(1, sp / r);
-    const wAdd = 2.2 * wl * kpd;
-    const iAdd = 0.8 * ink * (0.3 + 0.7*load) * kpd;
+    // 붓이 지나간 자리는 물·먹이 고르게 차오르고(목표치까지), 겹쳐 그으면 조금씩 더 짙어진다
+    const wT = 1.25 * wl, wAdd = 0.35 * wl * kpd;
+    const iT = 1.8 * Math.pow(ink, 1.5) * (0.5 + 0.55*wl) * (0.35 + 0.65*load) * along(d), iAdd = 0.22 * iT * kpd;
+    const edgeDry = 0.55 * (1 - water*0.7);   // 붓 가장자리 털은 먼저 말라 거칠게 갈라짐
     const xa = Math.max(0, Math.floor(gx-gr)), xb = Math.min(GW-1, Math.ceil(gx+gr));
     const ya = Math.max(0, Math.floor(gy-gr)), yb = Math.min(GH-1, Math.ceil(gy+gr));
     if (xa > xb || ya > yb) return;
@@ -310,16 +318,23 @@ function makeBrush(st){
       for (let xx = xa; xx <= xb; xx++, i++){
         const ddx = xx + 0.5 - gx, d2 = (ddx*ddx + ddy*ddy) * inv;
         if (d2 >= 1) continue;
-        let f = 1 - d2;
+        // 가장자리는 종이 결 따라 들쭉날쭉, 안쪽은 고르게 꽉 찬 붓 모양
+        const de = d2 * (1.18 - 0.36*G[i]);
+        if (de >= 1) continue;
+        let f = 1 - de*de*de;
         const u = (ddx*nx + ddy*ny) / gr;
         const b = br[clamp(((u+1)*0.5*(NB-1) + 0.5)|0, 0, NB-1)];
-        if (dryness > 0){
-          const v = b*0.6 + (A[i]-0.4)/1.2*0.4;
-          if (v < dryness*0.62) continue;
-          f *= Math.min(1, (v - dryness*0.62) * 4);
+        const u4 = u*u*u*u, dry = Math.max(dryness, edgeDry*u4);
+        if (dry > 0){
+          const v = b*0.6 + (A[i]-0.4)/1.2*0.32 + G[i]*0.08;
+          if (v < dry*0.62) continue;
+          f *= Math.min(1, (v - dry*0.62) * 4);
         }
-        W[i] = Math.min(WMAX, W[i] + wAdd*f);
-        S[i] += iAdd * f * (0.55 + 0.45*b);
+        const ib = (0.35 + 0.65*b) * clamp(0.75 + 0.45*u*side, 0.3, 1.2);
+        const w = W[i], tw = wT*f;
+        W[i] = Math.min(WMAX, w + (tw > w ? (tw - w)*0.5 : 0) + wAdd*f);
+        const si = S[i] + D[i]*0.5, ts = iT*f*ib;
+        S[i] += (ts > si ? (ts - si)*0.5 : 0) + iAdd*f*ib;
       }
     }
     markB(xa,ya,xb,yb); markR(xa,ya,xb,yb);
