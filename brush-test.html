@@ -1,0 +1,555 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>수묵 붓 시험 · 둥당기 메이커</title>
+<style>
+  :root{
+    --paper:#efe6d2; --paper-2:#e6dbc3; --ink:#1d1b1e; --ink-soft:#5a5450;
+    --seal:#b3352b; --line:#cfc2a6; --bg:#d9ceb6;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif;
+    display:flex; flex-direction:column; align-items:center;
+    padding:10px 16px 14px; gap:10px;
+    user-select:none; -webkit-user-select:none;
+  }
+  header{width:100%;max-width:1200px;display:flex;align-items:baseline;gap:10px}
+  h1{font-size:20px;margin:0;letter-spacing:.02em}
+  h1::before{content:"";display:inline-block;width:14px;height:14px;background:var(--seal);border-radius:2px;margin-right:8px;vertical-align:-1px}
+  .sub{color:var(--ink-soft);font-size:13px}
+  #stat{margin-left:auto;color:var(--ink-soft);font-size:12px;font-variant-numeric:tabular-nums}
+
+  .tools{width:100%;max-width:1200px;display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px}
+  .presets{display:flex;gap:6px;flex-wrap:wrap}
+  button{
+    font:inherit;font-size:14px;border:1px solid var(--line);background:var(--paper);
+    color:var(--ink);padding:7px 12px;border-radius:8px;cursor:pointer;
+  }
+  button:hover{border-color:var(--ink-soft)}
+  button.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+  button.primary{background:var(--seal);color:#fff;border-color:var(--seal)}
+  .tools label{display:flex;align-items:center;gap:6px;font-size:14px}
+  .tools input[type=range]{width:110px;accent-color:var(--ink)}
+  .tools .val{width:2.2em;text-align:right;font-variant-numeric:tabular-nums;color:var(--ink-soft);font-size:12px}
+  .spacer{flex:1}
+
+  #stage{
+    position:relative; width:min(100%, 1200px, calc((100vh - 250px) * 1.6));
+    aspect-ratio:16/10; border-radius:4px; overflow:hidden;
+    box-shadow:0 1px 0 #fff8 inset, 0 6px 24px #0002;
+    touch-action:none;
+  }
+  #stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+  #ink{cursor:crosshair}
+  #hint{
+    position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    color:#0003;font-size:22px;pointer-events:none;transition:opacity .6s
+  }
+  #banner{
+    position:absolute;left:50%;top:14px;transform:translateX(-50%);
+    background:var(--seal);color:#fff;padding:8px 16px;border-radius:20px;font-size:15px;
+    pointer-events:none;box-shadow:0 4px 12px #0003
+  }
+  #banner[hidden]{display:none}
+
+  #slots{width:100%;max-width:1200px;display:grid;grid-template-columns:repeat(9,1fr);gap:8px}
+  .slot{
+    position:relative;aspect-ratio:16/10;background:var(--paper-2);border:1px solid var(--line);
+    border-radius:6px;cursor:pointer;overflow:hidden;
+  }
+  .slot img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+  .slot b{position:absolute;left:4px;top:4px;font-size:12px;color:var(--ink-soft);background:var(--paper-2);border-radius:4px;padding:0 5px;line-height:18px}
+  .slot.full b{color:var(--seal)}
+  .slot.playing{outline:2px solid var(--seal)}
+  .assigning .slot{border-style:dashed;border-color:var(--seal)}
+  .help{width:100%;max-width:1200px;margin:0;color:var(--ink-soft);font-size:13px;line-height:1.6}
+  kbd{font-family:inherit;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 5px;background:var(--paper)}
+  @media (max-width:700px){
+    #slots{grid-template-columns:repeat(5,1fr)}
+    .tools input[type=range]{width:80px}
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>수묵 붓 시험</h1><span class="sub">둥당기 메이커 시제품</span>
+  <span id="stat"></span>
+</header>
+
+<div class="tools">
+  <div class="presets" id="presets">
+    <button data-w="35" data-i="100">농묵 · 진한 먹</button>
+    <button data-w="65" data-i="28">담묵 · 옅은 먹</button>
+    <button data-w="95" data-i="65">번지는 붓</button>
+    <button data-w="6" data-i="95">마른 붓 · 갈필</button>
+  </div>
+  <label>물 <input type="range" id="water" min="0" max="100" value="55"><span class="val" id="waterV"></span></label>
+  <label>먹 <input type="range" id="ink" min="5" max="100" value="80"><span class="val" id="inkV"></span></label>
+  <label>굵기 <input type="range" id="size" min="4" max="70" value="24"><span class="val" id="sizeV"></span></label>
+  <label><input type="checkbox" id="deplete" checked> 먹이 점점 줄어듦</label>
+  <span class="spacer"></span>
+  <button id="clear">새 종이</button>
+  <button id="save" class="primary">키에 담기</button>
+</div>
+
+<div id="stage">
+  <canvas id="paper" width="1200" height="750"></canvas>
+  <canvas id="inkc"></canvas>
+  <div id="hint">여기에 붓으로 그려 보세요</div>
+  <div id="banner" hidden>담을 키를 누르세요 (A ~ L)</div>
+</div>
+
+<div id="slots"></div>
+
+<p class="help">
+  천천히 그으면 굵고, 빠르게 그으면 가늘어져요. 붓을 멈추고 누르고 있으면 먹이 고여 번져요. 물이 많으면 마르면서 번지고, 물이 적으면 붓결이 갈라져요.
+  다 그린 뒤 <b>키에 담기</b>를 누르고 <kbd>A</kbd>~<kbd>L</kbd> 중 하나를 누르면, 그 키를 누를 때마다 그림이 처음부터 다시 그려져요.
+  <kbd>1</kbd>~<kbd>4</kbd>는 붓 고르기.
+</p>
+
+<script>
+(() => {
+'use strict';
+
+// ---------- 크기와 성능 ----------
+const LW = 1200, LH = 750;                       // 논리 좌표 (기기와 상관없이 같은 그림)
+const q = new URLSearchParams(location.search).get('q');
+const lowPower = /Android|iPhone/.test(navigator.userAgent);
+const SC = q ? Math.max(1, Math.min(4, +q)) : (lowPower ? 3 : 2);  // 격자 1칸 = SC 픽셀
+const GW = Math.floor(LW / SC), GH = Math.floor(LH / SC), N = GW * GH;
+
+// ---------- 시뮬레이션 상수 ----------
+const STEP_MS = 1000 / 120;
+const K = 0.07;           // 물 퍼짐
+const KP = 0.04;          // 젖은 곳끼리 먹 섞임
+const MINW = 0.015;       // 이보다 적으면 마른 칸
+const SPREAD = 0.11;      // 마른 종이로 번져 나가려면 필요한 물
+const EVAP = 0.0006;      // 증발
+const EDGE_EVAP = 0.0018; // 가장자리(물이 얇은 곳) 추가 증발 → 테두리가 진해짐
+const EDGE_T = 0.22;
+const DEP = 0.006;         // 먹이 종이에 가라앉는 속도
+const WMAX = 4;
+
+const W = new Float32Array(N), S = new Float32Array(N), D = new Float32Array(N);
+const dW = new Float32Array(N), dS = new Float32Array(N);
+const A = new Float32Array(N);   // 종이 흡수도 (닥나무 섬유 결)
+
+let bx0 = GW, by0 = GH, bx1 = -1, by1 = -1;      // 젖은 영역
+let rx0 = GW, ry0 = GH, rx1 = -1, ry1 = -1;      // 다시 그릴 영역
+
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const clamp = (v,a,b) => v < a ? a : v > b ? b : v;
+
+// ---------- 한지 ----------
+const fibers = [];
+(function makePaper(){
+  const r = mulberry32(20261027);
+  const tmp = new Float32Array(N);
+  const octaves = [[60, 0.4], [16, 0.3], [5, 0.3]];   // 논리 픽셀 크기
+  for (const [px, amp] of octaves){
+    const cell = Math.max(1.5, px / SC);
+    const lw = Math.ceil(GW / cell) + 2, lh = Math.ceil(GH / cell) + 2;
+    const lat = new Float32Array(lw * lh); for (let i = 0; i < lat.length; i++) lat[i] = r();
+    for (let y = 0; y < GH; y++){
+      const fy = y / cell, iy = fy | 0, ty = fy - iy, sy = ty*ty*(3-2*ty);
+      for (let x = 0; x < GW; x++){
+        const fx = x / cell, ix = fx | 0, tx = fx - ix, sx = tx*tx*(3-2*tx);
+        const a = lat[iy*lw+ix], b = lat[iy*lw+ix+1], c = lat[(iy+1)*lw+ix], d = lat[(iy+1)*lw+ix+1];
+        tmp[y*GW+x] += amp * ((a + (b-a)*sx) * (1-sy) + (c + (d-c)*sx) * sy);
+      }
+    }
+  }
+  // 섬유: 흡수가 잘 되는 가는 줄 → 먹이 실처럼 번져 나감
+  const nF = Math.floor(LW * LH / 900);
+  for (let k = 0; k < nF; k++){
+    let x = r()*LW, y = r()*LH, ang = r()*Math.PI*2, len = 20 + r()*70;
+    const pts = [[x,y]];
+    for (let s = 0; s < len; s += 3){
+      ang += (r()-0.5)*0.5; x += Math.cos(ang)*3; y += Math.sin(ang)*3; pts.push([x,y]);
+      const gx = (x/SC)|0, gy = (y/SC)|0;
+      if (gx >= 0 && gy >= 0 && gx < GW && gy < GH) tmp[gy*GW+gx] += 0.28;
+    }
+    fibers.push(pts);
+  }
+  for (let i = 0; i < N; i++) A[i] = clamp(0.2 + tmp[i] * 1.3, 0.35, 1.7);
+
+  // 보이는 종이
+  const pc = document.getElementById('paper'), g = pc.getContext('2d');
+  g.fillStyle = '#efe6d2'; g.fillRect(0, 0, LW, LH);
+  const id = g.getImageData(0, 0, LW, LH), px = id.data;
+  for (let y = 0; y < LH; y++) for (let x = 0; x < LW; x++){
+    const i = (y*LW+x)*4, a = A[Math.min(GH-1,(y/SC)|0)*GW + Math.min(GW-1,(x/SC)|0)];
+    const n = (r()-0.5)*7 - (a-1)*7;
+    px[i] += n; px[i+1] += n; px[i+2] += n*0.9;
+  }
+  g.putImageData(id, 0, 0);
+  g.lineCap = 'round';
+  for (const f of fibers){
+    g.strokeStyle = r() < 0.6 ? 'rgba(255,252,240,.55)' : 'rgba(130,110,80,.13)';
+    g.lineWidth = 0.6 + r()*0.8;
+    g.beginPath(); g.moveTo(f[0][0], f[0][1]); for (const p of f) g.lineTo(p[0], p[1]); g.stroke();
+  }
+})();
+
+// ---------- 먹 화면 ----------
+const ic = document.getElementById('inkc');
+ic.width = GW; ic.height = GH;
+const ictx = ic.getContext('2d');
+const img = ictx.createImageData(GW, GH), pix = img.data;
+for (let i = 0; i < N; i++){ pix[i*4] = 24; pix[i*4+1] = 22; pix[i*4+2] = 26; pix[i*4+3] = 0; }
+const ALUT = new Uint8ClampedArray(4096);
+for (let k = 0; k < 4096; k++){ const p = k / 512; ALUT[k] = 255 * (1 - Math.exp(-3.0 * p)); }
+
+function markR(x0,y0,x1,y1){ if(x0<rx0)rx0=x0; if(y0<ry0)ry0=y0; if(x1>rx1)rx1=x1; if(y1>ry1)ry1=y1; }
+function markB(x0,y0,x1,y1){ if(x0<bx0)bx0=x0; if(y0<by0)by0=y0; if(x1>bx1)bx1=x1; if(y1>by1)by1=y1; }
+
+function render(){
+  if (rx0 > rx1) return;
+  for (let y = ry0; y <= ry1; y++){
+    let i = y*GW + rx0;
+    for (let x = rx0; x <= rx1; x++, i++){
+      const p = S[i] + D[i];
+      let a = ALUT[Math.min(4095, (p*512)|0)];
+      const w = W[i];
+      if (w > 0) a += (255 - a) * Math.min(0.09, w * 0.06);   // 젖은 종이는 살짝 어둡게
+      pix[i*4+3] = a;
+    }
+  }
+  ictx.putImageData(img, 0, 0, rx0, ry0, rx1-rx0+1, ry1-ry0+1);
+  rx0 = GW; ry0 = GH; rx1 = -1; ry1 = -1;
+}
+
+function clearSim(){
+  W.fill(0); S.fill(0); D.fill(0); dW.fill(0); dS.fill(0);
+  bx0 = GW; by0 = GH; bx1 = -1; by1 = -1;
+  markR(0,0,GW-1,GH-1);
+}
+
+// ---------- 물과 먹의 움직임 ----------
+const C = new Float32Array(N);   // 먹 농도 = 먹 / 물
+
+function flow(i, j){
+  const wi = W[i], wj = W[j];
+  if (wi < MINW){ if (wj < MINW) return; const a = A[i]; if (wj*a*a < SPREAD) return; }
+  else if (wj < MINW){ const a = A[j]; if (wi*a*a < SPREAD) return; }
+  const f = K * (A[i] + A[j]) * (wi - wj);
+  let m;
+  if (f > 0){ m = f * C[i]; if (wj < EDGE_T) m *= 0.6; }        // 번져 나가는 물은 먹을 덜 데려감
+  else { m = f * C[j]; if (wi < EDGE_T) m *= 0.6; }
+  if (wi >= MINW && wj >= MINW) m += KP * (C[i] - C[j]) * (wi < wj ? wi : wj);
+  dW[i] -= f; dW[j] += f; dS[i] -= m; dS[j] += m;
+}
+
+function simStep(){
+  if (bx0 > bx1) return;
+  const x0 = Math.max(0,bx0-1), x1 = Math.min(GW-1,bx1+1), y0 = Math.max(0,by0-1), y1 = Math.min(GH-1,by1+1);
+  for (let y = y0; y <= y1; y++){
+    for (let i = y*GW + x0, e = y*GW + x1; i <= e; i++){ const w = W[i]; C[i] = w >= MINW ? S[i] / w : 0; }
+  }
+  for (let y = y0; y <= y1; y++){
+    for (let i = y*GW + x0, e = y*GW + x1; i < e; i++) if (W[i] > 0 || W[i+1] > 0) flow(i, i+1);
+  }
+  for (let y = y0; y < y1; y++){
+    for (let i = y*GW + x0, e = y*GW + x1; i <= e; i++) if (W[i] > 0 || W[i+GW] > 0) flow(i, i+GW);
+  }
+  let nx0 = GW, ny0 = GH, nx1 = -1, ny1 = -1;
+  for (let y = y0; y <= y1; y++){
+    let i = y*GW + x0, rowWet = false;
+    for (let x = x0; x <= x1; x++, i++){
+      let w = W[i] + dW[i];
+      if (w <= 0 && S[i] === 0 && dS[i] === 0){ W[i] = 0; dW[i] = 0; continue; }
+      let s = S[i] + dS[i]; dW[i] = 0; dS[i] = 0;
+      if (s < 0) s = 0;
+      if (w > 0){
+        w -= EVAP + (w < EDGE_T ? EDGE_EVAP : 0);
+        if (w < MINW){ D[i] += s; s = 0; w = 0; }
+        else {
+          const dep = s * DEP * (1 + 0.12 / (w + 0.05));
+          s -= dep; D[i] += dep;
+          if (x < nx0) nx0 = x; if (x > nx1) nx1 = x; rowWet = true;
+        }
+      } else { w = 0; D[i] += s; s = 0; }
+      W[i] = w; S[i] = s;
+    }
+    if (rowWet){ if (y < ny0) ny0 = y; ny1 = y; }
+  }
+  markR(x0,y0,x1,y1);
+  bx0 = nx0; by0 = ny0; bx1 = nx1; by1 = ny1;
+}
+
+// ---------- 붓 ----------
+// 같은 획 기록을 넣으면 같은 붓질이 나오도록, 실시간과 다시 그리기가 이 함수를 같이 쓴다.
+function makeBrush(st){
+  const water = st.w/100, ink = st.i/100, size = st.s, deplete = st.d;
+  const rnd = mulberry32(st.seed);
+  const NB = 20, br0 = new Float32Array(NB), br = new Float32Array(NB);
+  for (let k = 0; k < NB; k++) br0[k] = 0.25 + 0.75*rnd();
+  for (let k = 0; k < NB; k++) br[k] = (br0[Math.max(0,k-1)] + 2*br0[k] + br0[Math.min(NB-1,k+1)]) / 4;
+  let last = null, lastR = 0, dist = 0, speed = -1, gap = 0;
+
+  function dab(x, y, r, nx, ny, d, sp){
+    const gx = x/SC, gy = y/SC, gr = Math.max(0.7, r/SC);
+    const load = deplete ? Math.max(0, 1 - d / (700 + 1800*water)) : 1;
+    const wl = Math.max(0.03, water * Math.pow(load, 0.8));
+    const dryness = Math.max(clamp(1 - wl/0.3, 0, 1), clamp(1 - load*3, 0, 1));
+    const kpd = Math.min(1, sp / r);
+    const wAdd = 2.2 * wl * kpd;
+    const iAdd = 0.8 * ink * (0.3 + 0.7*load) * kpd;
+    const xa = Math.max(0, Math.floor(gx-gr)), xb = Math.min(GW-1, Math.ceil(gx+gr));
+    const ya = Math.max(0, Math.floor(gy-gr)), yb = Math.min(GH-1, Math.ceil(gy+gr));
+    if (xa > xb || ya > yb) return;
+    const inv = 1/(gr*gr);
+    for (let yy = ya; yy <= yb; yy++){
+      const ddy = yy + 0.5 - gy;
+      let i = yy*GW + xa;
+      for (let xx = xa; xx <= xb; xx++, i++){
+        const ddx = xx + 0.5 - gx, d2 = (ddx*ddx + ddy*ddy) * inv;
+        if (d2 >= 1) continue;
+        let f = 1 - d2;
+        const u = (ddx*nx + ddy*ny) / gr;
+        const b = br[clamp(((u+1)*0.5*(NB-1) + 0.5)|0, 0, NB-1)];
+        if (dryness > 0){
+          const v = b*0.6 + (A[i]-0.4)/1.2*0.4;
+          if (v < dryness*0.62) continue;
+          f *= Math.min(1, (v - dryness*0.62) * 4);
+        }
+        W[i] = Math.min(WMAX, W[i] + wAdd*f);
+        S[i] += iAdd * f * (0.55 + 0.45*b);
+      }
+    }
+    markB(xa,ya,xb,yb); markR(xa,ya,xb,yb);
+  }
+
+  return {
+    add(pt){
+      if (!last){
+        last = pt; lastR = Math.max(1, size*0.5*0.35);
+        dab(pt.x, pt.y, lastR, 0, 1, 0, lastR*0.5);
+        return;
+      }
+      const dx = pt.x - last.x, dy = pt.y - last.y, len = Math.hypot(dx, dy);
+      if (len < 0.75){
+        // 붓을 멈추고 누르고 있으면 먹물이 고여 번진다
+        const hold = pt.t - last.t;
+        if (hold >= 30){
+          const k = Math.min(3, hold/33);
+          lastR = Math.min(size*0.9, lastR + 0.5*k);
+          dab(last.x, last.y, lastR, 0, 1, dist, lastR*0.12*k);
+          last = { x: last.x, y: last.y, t: pt.t, p: last.p };
+        }
+        return;
+      }
+      const v = len / Math.max(1, pt.t - last.t);
+      speed = speed < 0 ? v : speed*0.75 + v*0.25;
+      const pf = pt.p >= 0 ? 0.2 + 0.95*pt.p : clamp(1.2 - speed*0.5, 0.3, 1.15);
+      const taper = Math.min(1, 0.3 + dist/50);
+      const tR = Math.max(1, size*0.5*pf*taper);
+      const nx = -dy/len, ny = dx/len;
+      let s = gap;
+      while (s <= len){
+        const k = s/len, r = lastR + (tR - lastR)*k;
+        const sp = Math.max(SC*0.45, r*0.22);
+        dab(last.x + dx*k, last.y + dy*k, r, nx, ny, dist + s, sp);
+        s += sp;
+      }
+      gap = s - len; dist += len; lastR = tR; last = pt;
+    }
+  };
+}
+
+// ---------- 화면 조작 ----------
+const $ = id => document.getElementById(id);
+const ui = { water: $('water'), ink: $('ink'), size: $('size'), deplete: $('deplete') };
+function showVals(){
+  $('waterV').textContent = ui.water.value; $('inkV').textContent = ui.ink.value; $('sizeV').textContent = ui.size.value;
+  for (const b of $('presets').children) b.classList.toggle('on', b.dataset.w === ui.water.value && b.dataset.i === ui.ink.value);
+}
+for (const k of ['water','ink','size']) ui[k].addEventListener('input', showVals);
+const presetBtns = [...$('presets').children];
+function applyPreset(b){ ui.water.value = b.dataset.w; ui.ink.value = b.dataset.i; showVals(); }
+presetBtns.forEach(b => b.addEventListener('click', () => applyPreset(b)));
+showVals();
+
+let current = [];          // 지금 종이의 획들
+let lastEndReal = 0;
+let active = null;         // {stroke, brush, ts0, id}
+let replay = null;         // {strokes, start, brushes, ptr, code}
+const hint = $('hint');
+
+function stagePoint(ev){
+  const r = ic.getBoundingClientRect();
+  return { x: (ev.clientX - r.left) / r.width * LW, y: (ev.clientY - r.top) / r.height * LH };
+}
+
+ic.addEventListener('pointerdown', e => {
+  if (active) return;
+  e.preventDefault();
+  stopReplay();
+  try { ic.setPointerCapture(e.pointerId); } catch(_){}
+  hint.style.opacity = 0;
+  const now = performance.now();
+  let t0 = 0;
+  if (current.length){
+    const prev = current[current.length-1];
+    const prevEnd = prev.t0 + (prev.pts.length ? prev.pts[prev.pts.length-1][2] : 0);
+    t0 = prevEnd + Math.min(450, lastEndReal ? now - lastEndReal : 450);   // 쉬는 시간은 짧게 줄여서 저장
+  }
+  const st = { w: +ui.water.value, i: +ui.ink.value, s: +ui.size.value, d: ui.deplete.checked ? 1 : 0,
+               seed: (Math.random()*1e9)|0, t0: Math.round(t0), pts: [] };
+  current.push(st);
+  active = { st, brush: makeBrush(st), ts0: e.timeStamp, tsOff: now - e.timeStamp, id: e.pointerId };
+  addPt(e);
+});
+function addPt(ev){
+  const p = stagePoint(ev);
+  const pt = { x: Math.round(p.x*10)/10, y: Math.round(p.y*10)/10,
+               t: Math.max(0, Math.round(ev.timeStamp - active.ts0)),
+               p: ev.pointerType === 'pen' ? Math.round(ev.pressure*100)/100 : -1 };
+  active.st.pts.push([pt.x, pt.y, pt.t, pt.p]);
+  active.brush.add(pt);
+  active.lastMove = performance.now(); active.lastEv = ev;
+}
+ic.addEventListener('pointermove', e => {
+  if (!active || e.pointerId !== active.id) return;
+  const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+  for (const ev of (evs.length ? evs : [e])) addPt(ev);
+});
+function endStroke(e){
+  if (!active || e.pointerId !== active.id) return;
+  active = null; lastEndReal = performance.now();
+}
+ic.addEventListener('pointerup', endStroke);
+ic.addEventListener('pointercancel', endStroke);
+
+$('clear').addEventListener('click', () => { stopReplay(); current = []; clearSim(); hint.style.opacity = 1; });
+
+// ---------- 키에 담기 / 다시 그리기 ----------
+const KEYS = ['KeyA','KeyS','KeyD','KeyF','KeyG','KeyH','KeyJ','KeyK','KeyL'];
+const STORE = 'ddgmaker-brush-test-v1';
+let slots = {};
+try { slots = JSON.parse(localStorage.getItem(STORE) || '{}') || {}; } catch(_){ slots = {}; }
+const slotEls = {};
+let assigning = false;
+
+function saveSlots(){ try { localStorage.setItem(STORE, JSON.stringify(slots)); } catch(_){} }
+function drawSlots(){
+  const box = $('slots'); box.innerHTML = '';
+  for (const code of KEYS){
+    const el = document.createElement('div'); el.className = 'slot';
+    const s = slots[code];
+    if (s){ el.classList.add('full'); const im = new Image(); im.src = s.thumb; el.appendChild(im); }
+    const b = document.createElement('b'); b.textContent = code.slice(3); el.appendChild(b);
+    el.addEventListener('click', () => onKey(code));
+    box.appendChild(el); slotEls[code] = el;
+  }
+}
+drawSlots();
+
+function setAssign(on){
+  assigning = on; $('banner').hidden = !on; document.body.classList.toggle('assigning', on);
+}
+$('save').addEventListener('click', () => {
+  if (!current.length){ flash('먼저 그림을 그려 주세요'); return; }
+  setAssign(!assigning);
+});
+let flashT = 0;
+function flash(msg){
+  const b = $('banner'); b.textContent = msg; b.hidden = false; clearTimeout(flashT);
+  flashT = setTimeout(() => { b.textContent = '담을 키를 누르세요 (A ~ L)'; b.hidden = !assigning; }, 1400);
+}
+
+function onKey(code){
+  if (assigning){
+    slots[code] = { strokes: JSON.parse(JSON.stringify(current)), thumb: ic.toDataURL() };
+    saveSlots(); setAssign(false); drawSlots();
+    flash(code.slice(3) + ' 키에 담았어요');
+    return;
+  }
+  if (slots[code]) startReplay(code);
+}
+
+function startReplay(code){
+  stopReplay();
+  if (active) active = null;
+  const strokes = slots[code].strokes;
+  clearSim(); hint.style.opacity = 0;
+  current = JSON.parse(JSON.stringify(strokes));   // 다시 그린 그림 위에 이어 그릴 수 있게
+  lastEndReal = 0;
+  replay = { strokes, start: performance.now(), brushes: strokes.map(() => null), ptr: strokes.map(() => 0), code };
+  slotEls[code] && slotEls[code].classList.add('playing');
+}
+function stopReplay(){
+  if (!replay) return;
+  slotEls[replay.code] && slotEls[replay.code].classList.remove('playing');
+  replay = null;
+}
+function replayTick(now){
+  if (!replay) return;
+  const el = now - replay.start;
+  let done = true;
+  replay.strokes.forEach((st, k) => {
+    if (replay.ptr[k] >= st.pts.length) return;
+    done = false;
+    if (st.t0 > el) return;
+    if (!replay.brushes[k]) replay.brushes[k] = makeBrush(st);
+    const br = replay.brushes[k];
+    while (replay.ptr[k] < st.pts.length){
+      const a = st.pts[replay.ptr[k]];
+      if (st.t0 + a[2] > el) break;
+      br.add({ x: a[0], y: a[1], t: a[2], p: a[3] });
+      replay.ptr[k]++;
+    }
+  });
+  if (done) stopReplay();
+}
+
+addEventListener('keydown', e => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;   // Cmd+R 등은 그대로
+  if (e.code === 'Escape'){ setAssign(false); return; }
+  const n = ['Digit1','Digit2','Digit3','Digit4'].indexOf(e.code);
+  if (n >= 0){ applyPreset(presetBtns[n]); return; }
+  if (KEYS.includes(e.code)){
+    e.preventDefault();
+    if (e.repeat) return;
+    onKey(e.code);
+  }
+});
+
+// ---------- 매 장면 ----------
+let acc = 0, lastT = performance.now(), fpsN = 0, fpsT = lastT;
+const stat = $('stat');
+function frame(now){
+  acc += Math.min(50, now - lastT); lastT = now;
+  replayTick(now);
+  if (active && now - active.lastMove > 33){          // 멈춰 있는 붓도 기록
+    const ev = active.lastEv;
+    addPt({ clientX: ev.clientX, clientY: ev.clientY, pointerType: ev.pointerType, pressure: ev.pressure, timeStamp: now - active.tsOff });
+  }
+  // 느린 기기에서는 한 장면에 8ms까지만 계산하고, 나머지는 천천히 마르게 둔다
+  let n = 0;
+  const t0 = performance.now();
+  while (acc >= STEP_MS && n < 4){
+    simStep(); acc -= STEP_MS; n++;
+    if (performance.now() - t0 > 8){ acc = 0; break; }
+  }
+  if (n === 4) acc = 0;
+  render();
+  fpsN++;
+  if (now - fpsT > 1000){
+    stat.textContent = `격자 ${GW}×${GH} · ${Math.round(fpsN * 1000 / (now - fpsT))}fps`;
+    fpsN = 0; fpsT = now;
+  }
+  requestAnimationFrame(frame);
+}
+markR(0,0,GW-1,GH-1);
+requestAnimationFrame(frame);
+
+})();
+</script>
+</body>
+</html>
