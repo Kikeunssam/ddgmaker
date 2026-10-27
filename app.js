@@ -13,7 +13,7 @@ const KEEP_MS = 900;                   // 다 그려진 그림이 사라지기 �
 const FADE_K = 0.92;                   // 수묵: 한 장면마다 남는 먹 (약 1초에 걸쳐 사라진다)
 const FADE_MS = 1000;                  // 단청·자개: 사라지는 데 걸리는 시간
 const RATE_MIN = 0.25, RATE_MAX = 8;   // 소리 길이에 맞출 때 빠르기 한도
-const STORE = "ddgmaker-work-v2", OLD_STORE = "ddgmaker-work-v1", THUMBS = "ddgmaker-thumbs-v2";
+const STORE = "ddgmaker-work-v2", OLD_STORE = "ddgmaker-work-v1", THUMBS = "ddgmaker-thumbs-v3";
 const SOUND_BY_ID = new Map(SOUNDS.map((s, i) => [s.id, { ...s, index: i }]));
 const { LW, LH, STEP_MS } = Ink;
 
@@ -28,8 +28,8 @@ const NB = BANKS.length;
 
 // ---------- 작품 ----------
 // work = { title, banks: [ { keys: { g: { snd, fit, strokes: [...] } } } × 3 ] }
-// 획 하나: 수묵 { w, i, s, d, seed, t0, pts }, 단청 { c, n, s, t0, pts }, 자개 { k, c, s, seed, t0, pts }
-// pts = [[x, y, t, p], ...] (x·y는 0.5px 단위, t는 ms, p는 펜 압력 또는 -1)
+// 수묵은 획 { w, i, s, d, seed, t0, pts }, pts = [[x, y, t, p], ...] (x·y는 0.5px 단위, t는 ms, p는 펜 압력 또는 -1)
+// 단청·자개는 찍은 문양 { m, x, y, s, r, a, t0 } (patterns.js) — 같은 strokes 자리에 담는다
 function emptyBank(b){
   const keys = {};
   for (const c of GRID) keys[c] = { snd: null, fit: true, strokes: [] };
@@ -46,12 +46,19 @@ function normalize(w){
     for (const c of GRID){
       const k = bk && bk.keys && bk.keys[c];
       if (!k) continue;
-      out.banks[b].keys[c] = { snd: SOUND_BY_ID.has(k.snd) ? k.snd : null, fit: k.fit !== false, strokes: Array.isArray(k.strokes) ? k.strokes : [] };
+      let strokes = Array.isArray(k.strokes) ? k.strokes : [];
+      if (BANKS[b].engine) strokes = strokes.filter(validStamp(b));   // 예전 단청·자개 붓 그림은 버린다
+      out.banks[b].keys[c] = { snd: SOUND_BY_ID.has(k.snd) ? k.snd : null, fit: k.fit !== false, strokes };
     }
   });
   return out;
 }
+function validStamp(b){
+  const n = MOTIFS[BANKS[b].kind].length;
+  return (st) => st && Number.isInteger(st.m) && st.m >= 0 && st.m < n && [st.x, st.y, st.s, st.r, st.t0].every(Number.isFinite);
+}
 const keyOf = (w, b, c) => w.banks[b].keys[c];
+const lenOf = (b, strokes) => (BANKS[b].engine ? Patterns.stampsLength(strokes) : Ink.strokesLength(strokes));
 const hasDrawing = (w) => w.banks.some((bk) => GRID.some((c) => bk.keys[c].strokes.length));
 
 let work, thumbs;
@@ -197,9 +204,9 @@ function finishReplays(){
   vreplays = vreplays.filter((r) => r.keep);   // 만들기 화면의 다시 그리기는 끝낸 뒤 목록에서 뺀다
 }
 
-function rateFor(k){
+function rateFor(k, b){
   if (!k.fit) return 1;
-  const len = Ink.strokesLength(k.strokes), sec = soundSec(k.snd);
+  const len = lenOf(b, k.strokes), sec = soundSec(k.snd);
   if (!len || !sec) return 1;
   return Math.min(RATE_MAX, Math.max(RATE_MIN, len / (sec * 1000)));
 }
@@ -208,7 +215,7 @@ function rateFor(k){
 let acc = 0, lastT = performance.now();
 function frame(now){
   acc += Math.min(50, now - lastT); lastT = now;
-  if (active && now - active.lastMove > 33){          // 멈춰 있는 붓도 기록
+  if (active && !active.stamp && now - active.lastMove > 33){          // 멈춰 있는 붓도 기록
     const ev = active.lastEv;
     addPt({ clientX: ev.clientX, clientY: ev.clientY, pointerType: ev.pointerType, pressure: ev.pressure, timeStamp: now - active.tsOff });
   }
@@ -257,23 +264,18 @@ function thumbOfCanvas(canvas){
   tctx.drawImage(canvas, 0, 0, 240, 150);
   return thumbCanvas.toDataURL("image/png");
 }
+// 문양은 setTransform으로 그리므로 큰 판에 그린 뒤 줄여서 옮긴다
+const bigCanvas = Object.assign(document.createElement("canvas"), { width: LW, height: LH });
 function thumbOfLayer(engine, L){
-  tctx.setTransform(1, 0, 0, 1, 0, 0);
-  tctx.clearRect(0, 0, 240, 150);
-  tctx.setTransform(240 / LW, 0, 0, 150 / LH, 0, 0);
-  // 자개는 화면에서처럼 그리되 setTransform을 쓰므로 축소한 판에 따로 그린 뒤 옮긴다
-  if (engine.kind === "jg"){
-    const big = thumbOfLayer.big || (thumbOfLayer.big = Object.assign(document.createElement("canvas"), { width: LW, height: LH }));
-    const g = big.getContext("2d"); g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, LW, LH);
-    engine.draw(g, L, 1200);
-    tctx.drawImage(big, 0, 0);
-  } else engine.draw(tctx, L, 0);
-  tctx.setTransform(1, 0, 0, 1, 0, 0);
-  return thumbCanvas.toDataURL("image/png");
+  const g = bigCanvas.getContext("2d");
+  g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, LW, LH);
+  engine.draw(g, L, performance.now());
+  return thumbOfCanvas(bigCanvas);
 }
 function bakeThumb(b, strokes){
   const bank = BANKS[b];
   if (bank.kind === "ink"){ Ink.bake(strokes, bakeSim); return thumbOfCanvas(bakeSim.canvas); }
+  if (!Patterns.ready()) return null;
   const L = bank.engine.newLayer();
   Patterns.makeReplay(bank.engine, strokes, L).to(Infinity);
   return thumbOfLayer(bank.engine, L);
@@ -286,7 +288,7 @@ function scheduleThumb(b, code){
     if (active || replays.length || vreplays.length) return scheduleThumb(b, code);   // 그리는 중이면 조금 뒤에
     if (BANKS[b].kind === "ink"){ sim.render(); setThumb(b, code, thumbOfCanvas(ic)); }
     else setThumb(b, code, thumbOfLayer(BANKS[b].engine, editLayer));
-  }, BANKS[b].kind === "ink" ? 1200 : 200);
+  }, BANKS[b].kind === "ink" ? 1200 : Patterns.ANIM_MS + 100);
 }
 function setThumb(b, code, url){
   if (url) thumbs[tkey(b, code)] = url; else delete thumbs[tkey(b, code)];
@@ -296,7 +298,7 @@ function setThumb(b, code, url){
 function bakeNextThumb(){
   for (let b = 0; b < NB; b++){
     const code = GRID.find((c) => keyOf(work, b, c).strokes.length && !thumbs[tkey(b, c)] && !(b === editBank && c === cur[b]));
-    if (code){ setThumb(b, code, bakeThumb(b, keyOf(work, b, code).strokes)); return; }
+    if (code){ const t = bakeThumb(b, keyOf(work, b, code).strokes); if (t) setThumb(b, code, t); return; }
   }
 }
 
@@ -317,43 +319,37 @@ function applyPreset(b){ ui.water.value = b.dataset.w; ui.ink.value = b.dataset.
 presetBtns.forEach((b) => b.addEventListener("click", () => applyPreset(b)));
 showVals();
 
-// 붓 설정: 단청 (빛깔, 대칭, 굵기)
-const dc = { c: 0, n: 8 };
-(function buildDcTools(){
-  const cbox = $("dc-colors");
-  Patterns.DC_COLORS.forEach((col, i) => {
-    const b = document.createElement("button"); b.type = "button"; b.className = "swatch"; b.title = col.name;
-    b.style.setProperty("--sw", col.c); b.innerHTML = `<i></i>${col.name}`;
-    b.addEventListener("click", () => { dc.c = i; drawDcTools(); });
-    cbox.appendChild(b);
+// 문양 찍기 설정: 뱅크마다 고른 문양과 움직임을 따로 기억한다
+const mt = [null, { m: 0, a: 0 }, { m: 0, a: 0 }];
+const mtSize = $("mt-size"), mtRot = $("mt-rot");
+function buildMotifTools(b){
+  const kind = BANKS[b].kind, box = $("mt-pick");
+  box.innerHTML = ""; box.dataset.kind = kind;
+  MOTIFS[kind].forEach((m, i) => {
+    const btn = document.createElement("button"); btn.type = "button"; btn.title = m.name;
+    btn.innerHTML = `<img alt="" src="${Patterns.img(m.id).src}"><span>${m.name}</span>`;
+    btn.addEventListener("click", () => { mt[b].m = i; drawMotifTools(); });
+    box.appendChild(btn);
   });
-  const sbox = $("dc-sym");
-  Patterns.DC_SYM.forEach((n) => {
-    const b = document.createElement("button"); b.type = "button"; b.dataset.n = n;
-    b.textContent = n === 1 ? "대칭 없음" : `${n}방향`;
-    b.addEventListener("click", () => { dc.n = n; drawDcTools(); });
-    sbox.appendChild(b);
+  drawMotifTools();
+}
+(function buildAnimTools(){
+  const box = $("mt-anim");
+  Patterns.ANIMS.forEach((an, i) => {
+    const btn = document.createElement("button"); btn.type = "button"; btn.textContent = an.name;
+    btn.addEventListener("click", () => { if (editBank) { mt[editBank].a = i; drawMotifTools(); } });
+    box.appendChild(btn);
   });
 })();
-function drawDcTools(){
-  [...$("dc-colors").children].forEach((b, i) => b.classList.toggle("on", i === dc.c));
-  [...$("dc-sym").children].forEach((b) => b.classList.toggle("on", +b.dataset.n === dc.n));
-  $("dc-sizeV").textContent = $("dc-size").value;
+function drawMotifTools(){
+  const sel = mt[editBank];
+  if (!sel) return;
+  [...$("mt-pick").children].forEach((btn, i) => btn.classList.toggle("on", i === sel.m));
+  [...$("mt-anim").children].forEach((btn, i) => btn.classList.toggle("on", i === sel.a));
+  $("mt-sizeV").textContent = mtSize.value; $("mt-rotV").textContent = mtRot.value + "°";
 }
-$("dc-size").addEventListener("input", drawDcTools);
-drawDcTools();
-
-// 붓 설정: 자개 (조각/알, 빛깔, 크기)
-const jg = { k: 0, c: 0 };
-for (const b of $("jg-kind").children) b.addEventListener("click", () => { jg.k = +b.dataset.k; drawJgTools(); });
-for (const b of $("jg-pal").children) b.addEventListener("click", () => { jg.c = +b.dataset.c; drawJgTools(); });
-function drawJgTools(){
-  for (const b of $("jg-kind").children) b.classList.toggle("on", +b.dataset.k === jg.k);
-  for (const b of $("jg-pal").children) b.classList.toggle("on", +b.dataset.c === jg.c);
-  $("jg-sizeV").textContent = $("jg-size").value;
-}
-$("jg-size").addEventListener("input", drawJgTools);
-drawJgTools();
+mtSize.addEventListener("input", drawMotifTools);
+mtRot.addEventListener("input", drawMotifTools);
 
 // 뱅크 고르기
 const bankTabs = [...$("bank-tabs").children];
@@ -363,8 +359,12 @@ function selectBank(b){
   finishReplays(); vreplays = [];
   editBank = b; lastEndReal = 0;
   bankTabs.forEach((t, i) => t.classList.toggle("on", i === b));
-  for (const el of document.querySelectorAll("[data-tools]")) el.hidden = +el.dataset.tools !== b;
+  for (const el of document.querySelectorAll("[data-tools]")) el.hidden = el.dataset.tools !== (BANKS[b].engine ? "stamp" : "ink");
+  if (BANKS[b].engine) buildMotifTools(b);
   $("maker").dataset.bank = b;
+  hint.textContent = BANKS[b].engine ? "문양을 골라 종이에 찍어 보시게 (누른 채 끌면 크기와 돌림이 바뀐다네)" : "여기에 붓으로 그려 보시게";
+  $("undo").textContent = BANKS[b].engine ? "문양 하나 지우기" : "한 획 지우기";
+  $("side-tip").textContent = "소리를 누르면 미리 들어 볼 수 있다네. 고른 뒤에는 왼쪽 종이에 이 소리에 어울리는 " + (BANKS[b].engine ? "문양을 찍어 보시게." : "붓질을 그려 보시게.");
   showBankOnStage(BANKS[b]);
   buildSoundPick();
   showKeyDrawing(cur[b]); drawTiles(); drawSide();
@@ -426,7 +426,7 @@ function drawSide(){
 function refreshFit(){
   if (mode !== "make") return;
   const k = keyOf(work, editBank, cur[editBank]);
-  const len = Ink.strokesLength(k.strokes) / 1000, sec = soundSec(k.snd);
+  const len = lenOf(editBank, k.strokes) / 1000, sec = soundSec(k.snd);
   $("dur").textContent = k.strokes.length ? `그림 ${len.toFixed(1)}초` : "";
   let info = "";
   if (!k.strokes.length) info = "그림을 그리면 여기에 빠르기가 나온다네.";
@@ -434,7 +434,7 @@ function refreshFit(){
   else if (!sec) info = "";
   else if (!k.fit) info = `그린 빠르기 그대로 ${len.toFixed(1)}초 동안 그린다네. (소리 ${sec.toFixed(1)}초)`;
   else {
-    const r = rateFor(k), shown = len / r;
+    const r = rateFor(k, editBank), shown = len / r;
     const how = Math.abs(r - 1) < 0.05 ? "그린 빠르기 그대로" : r > 1 ? `${r.toFixed(1)}배 빠르게` : `${(1 / r).toFixed(1)}배 느리게`;
     info = `소리 ${sec.toFixed(1)}초에 맞추어 ${how} 그린다네` + (Math.abs(shown - sec) > 0.15 ? ` (${shown.toFixed(1)}초, 더는 못 맞춘다네)` : "") + ".";
   }
@@ -474,8 +474,8 @@ function preview(code){
   if (k.snd) playSound(k.snd, editBank + code);
   if (!k.strokes.length) return;
   replays = []; vreplays = []; hint.style.opacity = 0;
-  if (bank.kind === "ink"){ sim.fading = false; sim.clear(); addReplay(k.strokes, rateFor(k), 0); }
-  else { bank.engine.clear(editLayer); addVReplay(bank.engine, k.strokes, rateFor(k), 0, editLayer); }
+  if (bank.kind === "ink"){ sim.fading = false; sim.clear(); addReplay(k.strokes, rateFor(k, editBank), 0); }
+  else { bank.engine.clear(editLayer); addVReplay(bank.engine, k.strokes, rateFor(k, editBank), 0, editLayer); }
   tiles[code].classList.add("flash"); setTimeout(() => tiles[code].classList.remove("flash"), 300);
 }
 
@@ -484,10 +484,11 @@ $("undo").addEventListener("click", () => {
   const c = cur[editBank], k = keyOf(work, editBank, c); if (!k.strokes.length) return;
   k.strokes.pop(); save(); showKeyDrawing(c);
   setThumb(editBank, c, k.strokes.length ? bakeThumb(editBank, k.strokes) : null); drawSide();
+  lastEndReal = 0;
 });
 $("clear-key").addEventListener("click", () => {
   const c = cur[editBank], k = keyOf(work, editBank, c); if (!k.strokes.length) return;
-  if (!confirm(`${JAMO[c]} 자판의 그림을 모두 지우겠는가?`)) return;
+  if (!confirm(`${JAMO[c]} 자판의 ${BANKS[editBank].engine ? "문양" : "그림"}을 모두 지우겠는가?`)) return;
   k.strokes = []; save(); showKeyDrawing(c); setThumb(editBank, c, null); drawSide();
 });
 $("title").addEventListener("input", () => { work.title = $("title").value.slice(0, 30); save(); });
@@ -506,6 +507,7 @@ stage.addEventListener("pointerdown", (e) => {
   hint.style.opacity = 0;
   const b = editBank, bank = BANKS[b], strokes = keyOf(work, b, cur[b]).strokes;
   const now = performance.now();
+  if (bank.engine){ startStamp(e, b, strokes, now); return; }
   let t0 = 0;
   if (strokes.length){
     const prev = strokes[strokes.length - 1];
@@ -513,21 +515,33 @@ stage.addEventListener("pointerdown", (e) => {
     t0 = prevEnd + Math.min(450, lastEndReal ? now - lastEndReal : 450);   // 쉬는 시간은 짧게 줄여서 저장
   }
   t0 = Math.round(t0);
-  const seed = (Math.random() * 1e9) | 0;
-  let st, brush;
-  if (bank.kind === "ink"){
-    st = { w: +ui.water.value, i: +ui.ink.value, s: +ui.size.value, d: ui.deplete.checked ? 1 : 0, seed, t0, pts: [] };
-    brush = Ink.makeBrush(st, sim);
-  } else if (bank.kind === "dc"){
-    st = { c: dc.c, n: dc.n, s: +$("dc-size").value, t0, pts: [] };
-  } else {
-    st = { k: jg.k, c: jg.c, s: +$("jg-size").value, seed, t0, pts: [] };
-  }
-  if (!brush){ bank.engine.begin(editLayer, st); brush = { add: (pt) => bank.engine.add(editLayer, pt) }; }
+  const st = { w: +ui.water.value, i: +ui.ink.value, s: +ui.size.value, d: ui.deplete.checked ? 1 : 0, seed: (Math.random() * 1e9) | 0, t0, pts: [] };
+  const brush = Ink.makeBrush(st, sim);
   strokes.push(st);
   active = { st, brush, ts0: e.timeStamp, tsOff: now - e.timeStamp, id: e.pointerId, b, code: cur[b] };
   addPt(e);
 });
+// 문양 찍기: 누른 자리에 찍고, 누른 채 끌면 끈 길이만큼 크기, 끈 방향만큼 돌림이 바뀐다.
+// 나타나는 때(t0)는 앞 문양을 찍은 뒤 쉰 시간 (GAP_MIN~GAP_MAX 안으로 줄인다)
+function startStamp(e, b, stamps, now){
+  const p = stagePoint(e), sel = mt[b];
+  let t0 = 0;
+  if (stamps.length){
+    const gap = lastEndReal ? now - lastEndReal : 300;
+    t0 = stamps[stamps.length - 1].t0 + Math.min(Patterns.GAP_MAX, Math.max(Patterns.GAP_MIN, gap));
+  }
+  const st = { m: sel.m, x: Math.round(p.x), y: Math.round(p.y), s: +mtSize.value, r: +mtRot.value, a: sel.a, t0: Math.round(t0) };
+  stamps.push(st);
+  BANKS[b].engine.add(editLayer, st, now);
+  lastEndReal = now;
+  active = { stamp: true, st, x0: p.x, y0: p.y, s0: st.s, r0: st.r, id: e.pointerId, b, code: cur[b] };
+}
+function moveStamp(e){
+  const p = stagePoint(e), A = active, dx = p.x - A.x0, dy = p.y - A.y0, d = Math.hypot(dx, dy);
+  if (d < 14){ A.st.s = A.s0; A.st.r = A.r0; return; }
+  A.st.s = Math.round(Math.min(900, Math.max(30, d * 2)));
+  A.st.r = Math.round(((A.r0 + Math.atan2(dy, dx) * 180 / Math.PI) % 360 + 360) % 360);
+}
 function addPt(ev){
   const p = stagePoint(ev);
   const pt = { x: Math.round(p.x * 2) / 2, y: Math.round(p.y * 2) / 2,
@@ -539,14 +553,15 @@ function addPt(ev){
 }
 stage.addEventListener("pointermove", (e) => {
   if (!active || e.pointerId !== active.id) return;
+  if (active.stamp){ moveStamp(e); return; }
   const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
   for (const ev of (evs.length ? evs : [e])) addPt(ev);
 });
 function endStroke(e){
   if (!active || e.pointerId !== active.id) return;
   const { b, code } = active;
-  if (BANKS[b].engine && editLayer) BANKS[b].engine.end(editLayer);
-  active = null; lastEndReal = performance.now();
+  if (!active.stamp) lastEndReal = performance.now();
+  active = null;
   save(); drawSide(); drawTile(code); scheduleThumb(b, code);
 }
 stage.addEventListener("pointerup", endStroke);
@@ -603,8 +618,8 @@ function trigger(code){
   const k = keyOf(playing, b, c);
   if (k.snd) playSound(k.snd, b + c);
   if (k.strokes.length){
-    const rate = rateFor(k);
-    const keep = sim.clock + Ink.strokesLength(k.strokes) / rate + KEEP_MS;
+    const rate = rateFor(k, b);
+    const keep = sim.clock + lenOf(b, k.strokes) / rate + KEEP_MS;
     if (BANKS[b].kind === "ink"){
       if (keep > sim.keepUntil) sim.keepUntil = keep;
       addReplay(k.strokes, rate, keep);
@@ -766,7 +781,7 @@ document.addEventListener("gesturestart", (e) => e.preventDefault());
 
 // ---------- 링크에 작품 담기 ----------
 // 획 기록을 바이트로 줄여(변화량만, 가변 길이 정수) 압축한 뒤 주소 # 뒤에 붙인다. 서버가 필요 없다.
-// 형식 1: 뱅크 1개(수묵)  형식 2: 뱅크 3개(수묵·단청·자개)
+// 형식 3: 뱅크 3개(수묵 획·단청 문양·자개 문양)
 function bytesWriter(){
   const a = [];
   const u = (n) => { n = Math.max(0, Math.round(n)); while (n >= 128){ a.push((n & 127) | 128); n = Math.floor(n / 128); } a.push(n); };
@@ -777,18 +792,35 @@ function bytesReader(buf){
   const u = () => { let n = 0, m = 1, b; do { if (i >= buf.length) throw new Error("짧은 데이터"); b = buf[i++]; n += (b & 127) * m; m *= 128; } while (b & 128); return n; };
   return { u, z: () => { const n = u(); return n % 2 ? -(n + 1) / 2 : n / 2; }, b: () => { if (i >= buf.length) throw new Error("짧은 데이터"); return buf[i++]; } };
 }
-// 뱅크마다 다른 붓 설정
-const STROKE_HEAD = [
-  { w: (o, st) => { o.b(st.w); o.b(st.i); o.u(st.s); o.b(st.d); o.u(st.seed >>> 0); },
-    r: (r) => ({ w: r.b(), i: r.b(), s: r.u(), d: r.b(), seed: r.u() | 0 }) },
-  { w: (o, st) => { o.b(st.c); o.b(st.n); o.u(st.s); },
-    r: (r) => ({ c: r.b(), n: r.b(), s: r.u() }) },
-  { w: (o, st) => { o.b(st.k); o.b(st.c); o.u(st.s); o.u(st.seed >>> 0); },
-    r: (r) => ({ k: r.b(), c: r.b(), s: r.u(), seed: r.u() | 0 }) },
-];
+// 수묵 획: 붓 설정 + 점마다 변화량.  단청·자개 문양: 문양·움직임·자리·크기·돌림 + 앞 문양과의 시간 차.
+function packInk(o, st){
+  o.b(st.w); o.b(st.i); o.u(st.s); o.b(st.d); o.u(st.seed >>> 0);
+  o.u(st.t0);
+  const pen = st.pts.some((p) => p[3] >= 0);
+  o.b(pen ? 1 : 0); o.u(st.pts.length);
+  let px = 0, py = 0, pt = 0;
+  for (const p of st.pts){
+    o.z(p[0] * 2 - px); o.z(p[1] * 2 - py); o.z(p[2] - pt);
+    px = Math.round(p[0] * 2); py = Math.round(p[1] * 2); pt = p[2];
+    if (pen) o.b(p[3] >= 0 ? Math.round(p[3] * 100) : 255);
+  }
+}
+function unpackInk(r){
+  const st = { w: r.b(), i: r.b(), s: r.u(), d: r.b(), seed: r.u() | 0 };
+  st.t0 = r.u(); st.pts = [];
+  const pen = r.b() & 1, np = r.u();
+  let px = 0, py = 0, pt = 0;
+  for (let k = 0; k < np; k++){
+    px += r.z(); py += r.z(); pt += r.z();
+    let p = -1;
+    if (pen){ const v = r.b(); p = v === 255 ? -1 : v / 100; }
+    st.pts.push([px / 2, py / 2, pt, p]);
+  }
+  return st;
+}
 function packWork(w){
   const o = bytesWriter();
-  o.b(2);   // 형식 번호
+  o.b(3);   // 형식 번호
   const title = new TextEncoder().encode(w.title || "");
   o.u(title.length); for (const x of title) o.b(x);
   for (let b = 0; b < NB; b++){
@@ -797,44 +829,33 @@ function packWork(w){
       o.u(k.snd ? SOUND_BY_ID.get(k.snd).index + 1 : 0);
       o.b(k.fit ? 1 : 0);
       o.u(k.strokes.length);
+      let t = 0;
       for (const st of k.strokes){
-        STROKE_HEAD[b].w(o, st);
-        o.u(st.t0);
-        const pen = st.pts.some((p) => p[3] >= 0);
-        o.b(pen ? 1 : 0); o.u(st.pts.length);
-        let px = 0, py = 0, pt = 0;
-        for (const p of st.pts){
-          o.z(p[0] * 2 - px); o.z(p[1] * 2 - py); o.z(p[2] - pt);
-          px = Math.round(p[0] * 2); py = Math.round(p[1] * 2); pt = p[2];
-          if (pen) o.b(p[3] >= 0 ? Math.round(p[3] * 100) : 255);
-        }
+        if (!BANKS[b].engine){ packInk(o, st); continue; }
+        o.b(st.m); o.b(st.a); o.u(st.x); o.u(st.y); o.u(st.s); o.u(st.r); o.u(st.t0 - t); t = st.t0;
       }
     }
   }
   return new Uint8Array(o.a);
 }
+// 형식 1: 수묵 뱅크만. 형식 2: 단청·자개가 붓으로 그리던 때 — 수묵만 읽고 나머지는 버린다. 형식 3: 지금.
 function unpackWork(buf){
   const r = bytesReader(buf);
   const ver = r.b();
-  if (ver !== 1 && ver !== 2) throw new Error("모르는 형식");
+  if (ver < 1 || ver > 3) throw new Error("모르는 형식");
   const tl = r.u(), tb = new Uint8Array(tl);
   for (let i = 0; i < tl; i++) tb[i] = r.b();
   const w = { title: new TextDecoder().decode(tb), banks: [] };
-  for (let b = 0; b < (ver === 1 ? 1 : NB); b++){
+  for (let b = 0; b < (ver === 3 ? NB : 1); b++){
     const keys = {};
     for (const c of GRID){
       const si = r.u(), fit = r.b() & 1, ns = r.u(), strokes = [];
+      let t = 0;
       for (let s = 0; s < ns; s++){
-        const st = STROKE_HEAD[b].r(r);
-        st.t0 = r.u(); st.pts = [];
-        const pen = r.b() & 1, np = r.u();
-        let px = 0, py = 0, pt = 0;
-        for (let k = 0; k < np; k++){
-          px += r.z(); py += r.z(); pt += r.z();
-          let p = -1;
-          if (pen){ const v = r.b(); p = v === 255 ? -1 : v / 100; }
-          st.pts.push([px / 2, py / 2, pt, p]);
-        }
+        if (!BANKS[b].engine){ strokes.push(unpackInk(r)); continue; }
+        const m = r.b(), a = r.b();
+        const st = { m, x: r.u(), y: r.u(), s: r.u(), r: r.u(), a };
+        st.t0 = t += r.u();
         strokes.push(st);
       }
       keys[c] = { snd: si ? (SOUNDS[si - 1] || {}).id || null : null, fit: !!fit, strokes };

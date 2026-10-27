@@ -767,9 +767,36 @@ body { background: #efe7d6 url("assets/hanji_dak.jpg") center / cover fixed; }
 #bank-tabs em { font-style: normal; color: var(--red); margin-right: 6px; font-weight: 700; }
 #maker #bank-tabs button.on em { color: #f1a08f; }
 
-/* 단청 빛깔 */
-#maker .swatch { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px 5px 7px; }
-.swatch i { width: 16px; height: 16px; background: var(--sw); box-shadow: 0 0 0 1px #1d1a17, 0 0 0 3px #fbf8ef, 0 0 0 4px #1d1a17; margin: 0 4px; }
+/* 단청·자개 문양 고르기: 한 줄로 늘어놓고 옆으로 넘겨 본다 */
+.stamp-tools { flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 6px; min-width: 0; max-width: 100%; }
+.stamp-tools .row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+.stamp-tools .lbl { font-size: 14px; }
+.motifs { display: flex; gap: 6px; min-width: 0; overflow-x: auto; padding: 2px 2px 6px; scrollbar-width: thin; }
+#maker .motifs button {
+  flex: 0 0 auto;
+  width: 64px;
+  padding: 4px 2px 3px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  background: #faf8f2;
+  font-size: 11px;
+  letter-spacing: 0;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.motifs img { width: 44px; height: 44px; object-fit: contain; pointer-events: none; }
+.motifs span { max-width: 60px; overflow: hidden; text-overflow: ellipsis; }
+#maker .motifs[data-kind="jg"] button { background: #151413; color: #d9d1c1; }
+#maker .motifs button.on { background: #f6e6dc; color: var(--ink); border-color: var(--red); box-shadow: 0 0 0 2px var(--red); }
+#maker .motifs[data-kind="jg"] button.on { background: #2e2925; color: #f6efe4; }
+#maker #mt-anim button { padding: 4px 9px; font-size: 13px; }
+.stamp-tools input[type=range] { width: 90px; }
+
+/* 문양 고르기가 한 줄 더 있으니 종이를 조금 줄인다 */
+#maker:not([data-bank="0"]) #stage-box,
+#maker:not([data-bank="0"]) #keyboard { width: min(100%, calc((100vh - 480px) * 1.6)); }
 
 /* 자판 모양도 뱅크의 종이 빛깔을 따른다 */
 #maker[data-bank="1"] .kt { background: #faf8f2; }
