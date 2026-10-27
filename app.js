@@ -4,6 +4,8 @@
 const $ = (id) => document.getElementById(id);
 const GRID = "qwertyuiopasdfghjklzxcvbnm".split("");      // 터치 칸·링크 순서 (1편과 같다)
 const ROWS = ["qwertyuiop", "asdfghjkl", "zxcvbnm"];
+// 화면에는 두벌식 한글 자판 글자로 보여 준다 (동작은 1편처럼 자판 자리 e.code 기준)
+const JAMO = Object.fromEntries(GRID.map((c, i) => [c, "ㅂㅈㄷㄱㅅㅛㅕㅑㅐㅔㅁㄴㅇㄹㅎㅗㅓㅏㅣㅋㅌㅊㅍㅠㅜㅡ"[i]]));
 const MOBILE = window.matchMedia("(pointer: coarse)").matches;
 const MAX_REPLAYS = MOBILE ? 6 : 12;   // 연주 때 동시에 다시 그려지는 그림 수 (1편 동시 영상 상한과 같다)
 const VOICES_PER_KEY = 8;
@@ -42,7 +44,7 @@ let saveTimer = 0;
 function save(){
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    try { localStorage.setItem(STORE, JSON.stringify(work)); } catch (_) { toast("저장 공간이 모자라요"); }
+    try { localStorage.setItem(STORE, JSON.stringify(work)); } catch (_) { toast("저장할 자리가 모자라네"); }
     try { localStorage.setItem(THUMBS, JSON.stringify(thumbs)); } catch (_) {}
   }, 300);
 }
@@ -116,8 +118,8 @@ document.addEventListener("visibilitychange", () => {
 
 // 소리는 모두 합쳐 3MB 남짓이라 처음에 다 받아 둔다 (소리 길이를 알아야 빠르기를 맞출 수 있다)
 Promise.all(SOUNDS.map((s) => ensureSound(s.id))).catch((err) => {
-  const hint = location.protocol === "file:" ? " (소리를 바꿨다면 python3 tools/make_sounds_js.py 를 한 번 실행해 주세요)" : "";
-  toast(`불러오지 못한 소리가 있어요: ${err.message}${hint}`, 8);
+  const hint = location.protocol === "file:" ? " (소리를 바꿨다면 python3 tools/make_sounds_js.py 를 한 번 실행하시게)" : "";
+  toast(`불러오지 못한 소리가 있네: ${err.message}${hint}`, 8);
 });
 
 // ---------- 먹 종이 ----------
@@ -227,7 +229,7 @@ const tiles = {};
     const r = document.createElement("div"); r.className = `krow r${ri + 1}`;
     for (const c of row){
       const el = document.createElement("div"); el.className = "kt";
-      el.innerHTML = `<img alt="" hidden><b>${c.toUpperCase()}</b><span></span>`;
+      el.innerHTML = `<img alt="" hidden><b>${JAMO[c]}</b><span></span>`;
       el.addEventListener("click", () => { selectKey(c); preview(c); });
       r.appendChild(el); tiles[c] = el;
     }
@@ -263,7 +265,7 @@ const drawTiles = () => GRID.forEach(drawTile);
 })();
 function drawSide(){
   const k = work.keys[cur];
-  $("cur-key").textContent = cur.toUpperCase();
+  $("cur-key").textContent = JAMO[cur];
   const s = k.snd && SOUND_BY_ID.get(k.snd);
   $("cur-sound").textContent = s ? `${s.group} ${s.name}` : "소리 없음";
   for (const b of $("sound-pick").querySelectorAll("button")){
@@ -279,14 +281,14 @@ function refreshFit(){
   const len = Ink.strokesLength(k.strokes) / 1000, sec = soundSec(k.snd);
   $("dur").textContent = k.strokes.length ? `그림 ${len.toFixed(1)}초` : "";
   let info = "";
-  if (!k.strokes.length) info = "그림을 그리면 여기에 빠르기가 나와요.";
-  else if (!k.snd) info = "소리가 없어서 그린 빠르기 그대로 다시 그려요.";
+  if (!k.strokes.length) info = "그림을 그리면 여기에 빠르기가 나온다네.";
+  else if (!k.snd) info = "소리가 없으니 그린 빠르기 그대로 다시 그린다네.";
   else if (!sec) info = "";
-  else if (!k.fit) info = `그린 빠르기 그대로 ${len.toFixed(1)}초 동안 그려요. (소리 ${sec.toFixed(1)}초)`;
+  else if (!k.fit) info = `그린 빠르기 그대로 ${len.toFixed(1)}초 동안 그린다네. (소리 ${sec.toFixed(1)}초)`;
   else {
     const r = rateFor(k), shown = len / r;
     const how = Math.abs(r - 1) < 0.05 ? "그린 빠르기 그대로" : r > 1 ? `${r.toFixed(1)}배 빠르게` : `${(1 / r).toFixed(1)}배 느리게`;
-    info = `소리 ${sec.toFixed(1)}초에 맞춰 ${how} 그려요` + (Math.abs(shown - sec) > 0.15 ? ` (${shown.toFixed(1)}초, 더는 못 맞춰요)` : "") + ".";
+    info = `소리 ${sec.toFixed(1)}초에 맞추어 ${how} 그린다네` + (Math.abs(shown - sec) > 0.15 ? ` (${shown.toFixed(1)}초, 더는 못 맞춘다네)` : "") + ".";
   }
   $("fit-info").textContent = info;
 }
@@ -329,7 +331,7 @@ $("undo").addEventListener("click", () => {
 });
 $("clear-key").addEventListener("click", () => {
   const k = work.keys[cur]; if (!k.strokes.length) return;
-  if (!confirm(`${cur.toUpperCase()} 키의 그림을 모두 지울까요?`)) return;
+  if (!confirm(`${JAMO[cur]} 자판의 그림을 모두 지우겠는가?`)) return;
   k.strokes = []; save(); showKeyDrawing(cur); setThumb(cur, null); drawSide();
 });
 $("title").addEventListener("input", () => { work.title = $("title").value.slice(0, 30); save(); });
@@ -451,9 +453,9 @@ function showStart(){
   if (shared){
     const sub = $("start-sub");
     sub.textContent = "";
-    const b = document.createElement("b"); b.textContent = shared.title ? `「${shared.title}」` : "친구가 보낸 작품";
-    sub.append(b, document.createTextNode(shared.title ? " 을(를) 연주해 보세요" : "을 연주해 보세요"));
-    $("start-hint").textContent = "아무 키나 누르면 연주를 시작해요";
+    const b = document.createElement("b"); b.textContent = shared.title ? `「${shared.title}」` : "벗이 보낸 작품";
+    sub.append(b, document.createTextNode(shared.title ? ", 한번 연주해 보시게" : "을 연주해 보시게"));
+    $("start-hint").textContent = "아무 자판이나 누르면 연주를 시작하네";
   }
 }
 function leaveStart(then){
@@ -468,7 +470,7 @@ function leaveStart(then){
 $("start-make").addEventListener("click", () => leaveStart(enterMake));
 $("start-play").addEventListener("click", () => leaveStart(() => enterPlay(shared, "start")));
 $("start-remix").addEventListener("click", () => {
-  if (hasDrawing(work) && !confirm("지금 만들고 있던 작품 대신 이 작품을 고쳐 만들까요?\n(만들던 작품은 지워져요)")) return;
+  if (hasDrawing(work) && !confirm("지금 만들던 작품 대신 이 작품을 고쳐 만들겠는가?\n(만들던 작품은 지워진다네)")) return;
   work = normalize(JSON.parse(JSON.stringify(shared)));
   thumbs = {}; save();
   shared = null;
@@ -497,13 +499,13 @@ for (const v of [$("help"), $("share")]){
 
 $("open-play").addEventListener("click", () => enterPlay(work, "make"));
 $("open-share").addEventListener("click", async () => {
-  if (!hasDrawing(work)){ toast("먼저 키에 그림을 그려 주세요"); return; }
+  if (!hasDrawing(work)){ toast("먼저 자판에 그림을 그려 보시게"); return; }
   const link = location.href.split("#")[0] + "#w=" + await encodeWork(work);
   $("share-link").value = link;
   const kb = (link.length / 1000).toFixed(1);
   $("share-note").textContent = link.length > 8000
-    ? `링크가 길어요 (${kb}천 자). 메신저에 따라 잘릴 수 있으니, 그림을 짧게 하거나 획 수를 줄이면 짧아져요.`
-    : `링크 길이 ${link.length.toLocaleString()}자`;
+    ? `주소가 길다네 (${kb}천 자). 메신저에 따라 잘릴 수 있으니, 그림을 짧게 하거나 획을 줄이면 짧아진다네.`
+    : `주소 길이 ${link.length.toLocaleString()}자`;
   openVeil($("share"), $("share-copy"));
   $("share-link").select();
 });
@@ -511,7 +513,7 @@ $("share-copy").addEventListener("click", async () => {
   const t = $("share-link");
   try { await navigator.clipboard.writeText(t.value); }
   catch (_) { t.select(); document.execCommand("copy"); }
-  toast("링크를 복사했어요");
+  toast("주소를 복사했네");
 });
 $("share-close").addEventListener("click", () => closeVeil($("share")));
 
@@ -646,7 +648,7 @@ window.ddgmaker = { encodeWork, decodeWork, packWork, get work(){ return work; }
   const m = location.hash.match(/^#w=(.+)$/);
   if (m){
     try { shared = await decodeWork(m[1]); }
-    catch (err){ console.warn(err); toast("링크에서 작품을 읽지 못했어요. 주소가 잘리지 않았는지 확인해 주세요.", 6); }
+    catch (err){ console.warn(err); toast("주소에서 작품을 읽지 못했네. 주소가 잘리지 않았는지 살펴보시게.", 6); }
   }
   showStart();
 })();
