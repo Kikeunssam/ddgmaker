@@ -131,7 +131,6 @@ kbd {
   display: flex;
   align-items: flex-end;
   gap: 14px;
-  margin-left: calc(14px + 2.4em);
 }
 
 #start .logo img {
