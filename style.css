@@ -239,8 +239,10 @@ a.btn { display: inline-block; text-decoration: none; }
 .btn.small::after { --c: 3.5px; inset: 1px; }
 .btn.small:hover { color: var(--ink); }
 
-#start .btn.corner {
+#start .corner {
   position: absolute;
+  display: flex;
+  gap: 8px;
   top: calc(16px + env(safe-area-inset-top, 0px));
   right: calc(16px + env(safe-area-inset-right, 0px));
   z-index: 2;
