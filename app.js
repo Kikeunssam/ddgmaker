@@ -979,16 +979,49 @@ for (const v of [$("help"), $("share"), $("reset")]){
 }
 
 $("open-play").addEventListener("click", () => enterPlay(work, "make"));
+// 벗에게 나누기: 작품 기록을 Firestore에 맡기고 짧은 주소(#s=…)를 준다.
+// 같은 작품이면 같은 번호가 나온다(기록의 지문으로 번호를 만든다). 맡기지 못하면 기록을 통째로 담은 긴 주소(#w=…)를 준다.
+const STORE_URL = "https://firestore.googleapis.com/v1/projects/dungdanggi/databases/(default)/documents/works";
+async function shortId(str){
+  const B62 = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  let bytes;
+  try { bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str))); }
+  catch (_){ bytes = crypto.getRandomValues(new Uint8Array(16)); }
+  let id = ""; for (let i = 0; i < 10; i++) id += B62[bytes[i] % 62];
+  return id;
+}
+async function storeWork(str){
+  const id = await shortId(str);
+  const res = await fetch(`${STORE_URL}?documentId=${id}`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fields: { w: { stringValue: str }, v: { integerValue: "4" } } }),
+  });
+  if (!res.ok && res.status !== 409) throw new Error(`맡기기 실패 (${res.status})`);   // 409: 이미 맡긴 같은 작품
+  return id;
+}
+async function fetchStored(id){
+  const res = await fetch(`${STORE_URL}/${encodeURIComponent(id)}`);
+  if (!res.ok) throw new Error(`불러오기 실패 (${res.status})`);
+  const doc = await res.json();
+  return decodeWork(doc.fields.w.stringValue);
+}
 $("open-share").addEventListener("click", async () => {
   if (!hasDrawing(work)){ toast("먼저 자판에 그림을 그려 보시게"); return; }
-  const link = location.href.split("#")[0] + "#w=" + await encodeWork(work);
-  $("share-link").value = link;
-  const kb = (link.length / 1000).toFixed(1);
-  $("share-note").textContent = link.length > 8000
-    ? `주소가 길다네 (${kb}천 자). 메신저에 따라 잘릴 수 있으니, 그림을 짧게 하거나 획을 줄이면 짧아진다네.`
-    : `주소 길이 ${link.length.toLocaleString()}자`;
-  openVeil($("share"), $("share-copy"));
-  $("share-link").select();
+  const base = location.href.split("#")[0], str = await encodeWork(work);
+  $("share-link").value = ""; $("share-note").textContent = "짧은 주소를 만드는 중이라네…";
+  $("share-copy").disabled = true;
+  openVeil($("share"), $("share-close"));
+  let link;
+  try {
+    link = base + "#s=" + await storeWork(str);
+    $("share-note").textContent = "이 주소로 언제든 지금 모습의 작품을 열 수 있다네. 더 고치면 다시 나누시게.";
+  } catch (err){
+    console.warn(err);
+    link = base + "#w=" + str;
+    $("share-note").textContent = `짧은 주소를 만들지 못해 작품을 통째로 담은 긴 주소를 만들었다네 (${link.length.toLocaleString()}자). 인터넷이 이어졌는지 살펴보시게.`;
+  }
+  $("share-link").value = link; $("share-copy").disabled = false;
+  $("share-copy").focus(); $("share-link").select();
 });
 $("share-copy").addEventListener("click", async () => {
   const t = $("share-link");
@@ -1155,16 +1188,16 @@ async function decodeWork(str){
   if (kind === "r") return unpackWork(bytes);
   throw new Error("모르는 형식");
 }
-window.ddgmaker = { encodeWork, decodeWork, packWork, get work(){ return work; }, get mixMap(){ return mixMap; } };   // 시험용
+window.ddgmaker = { encodeWork, decodeWork, packWork, shortId, get work(){ return work; }, get mixMap(){ return mixMap; } };   // 시험용
 
 // ---------- 시작 ----------
 showBankOnStage(BANKS[0]);
 requestAnimationFrame(frame);
 (async function boot(){
-  const m = location.hash.match(/^#w=(.+)$/);
+  const m = location.hash.match(/^#([ws])=(.+)$/);
   if (m){
-    try { shared = await decodeWork(m[1]); }
-    catch (err){ console.warn(err); toast("주소에서 작품을 읽지 못했네. 주소가 잘리지 않았는지 살펴보시게.", 6); }
+    try { shared = m[1] === "s" ? await fetchStored(m[2]) : await decodeWork(m[2]); }
+    catch (err){ console.warn(err); toast(m[1] === "s" ? "작품을 불러오지 못했네. 주소가 맞는지, 인터넷이 이어졌는지 살펴보시게." : "주소에서 작품을 읽지 못했네. 주소가 잘리지 않았는지 살펴보시게.", 6); }
   }
   showStart();
 })();

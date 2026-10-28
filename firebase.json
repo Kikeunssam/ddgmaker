@@ -13,12 +13,40 @@
       "sounds.js",
       "brush-test.html",
       "tools/**",
-      "_to_delete/**"
+      "_to_delete/**",
+      "firestore.rules"
     ],
     "headers": [
-      { "source": "**/*.@(wav|m4a|mp3|jpg|png|svg|woff2)", "headers": [{ "key": "Cache-Control", "value": "public, max-age=604800" }] },
-      { "source": "**/*.@(js|css|html)", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] },
-      { "source": "/", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] }
+      {
+        "source": "**/*.@(wav|m4a|mp3|jpg|png|svg|woff2)",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "public, max-age=604800"
+          }
+        ]
+      },
+      {
+        "source": "**/*.@(js|css|html)",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
+      },
+      {
+        "source": "/",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
+      }
     ]
+  },
+  "firestore": {
+    "rules": "firestore.rules"
   }
 }
